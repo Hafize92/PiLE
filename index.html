@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f766e">
+    <title>PiLE</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <img class="brand-mark" src="assets/hafize-mark.svg" alt="">
+          <div>
+            <h1>PiLE</h1>
+            <p>Hafize | ver1.0.0</p>
+          </div>
+        </div>
+        <div class="sync-pill" id="syncStatus" aria-live="polite">
+          <span class="status-dot"></span>
+          <span>Local</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="entry-panel" aria-labelledby="entryTitle">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Entry</p>
+              <h2 id="entryTitle">Piling record</h2>
+            </div>
+            <button class="icon-button ghost" type="button" id="resetButton" aria-label="Reset form" title="Reset form">
+              <span aria-hidden="true">R</span>
+            </button>
+          </div>
+
+          <form id="recordForm" autocomplete="off">
+            <div class="field-grid">
+              <label>
+                <span>Project Name</span>
+                <input id="projectName" name="projectName" required placeholder="Project A">
+              </label>
+              <label>
+                <span>Block Name</span>
+                <input id="blockName" name="blockName" required placeholder="Block 1">
+              </label>
+              <label>
+                <span>Supervisor</span>
+                <input id="username" name="username" required placeholder="Supervisor">
+              </label>
+              <label>
+                <span>Date</span>
+                <input id="recordDate" name="recordDate" type="date" required>
+              </label>
+              <label class="span-2">
+                <span>Piling Point Numbers</span>
+                <input id="pilingPointNumber" name="pilingPointNumber" required inputmode="numeric" placeholder="P-001">
+              </label>
+            </div>
+
+            <div class="length-panel">
+              <div class="length-head">
+                <div>
+                  <p class="eyebrow">Piling used</p>
+                  <h3>Length count</h3>
+                </div>
+                <div class="preview-stack">
+                  <output id="meterPreview" for="length3m length6m length9m length12m">0 m</output>
+                  <output id="weldingPreview" for="length3m length6m length9m length12m">0 welding</output>
+                </div>
+              </div>
+
+              <div class="length-grid">
+                <label>
+                  <span>3m</span>
+                  <input id="length3m" name="length3m" type="number" min="0" step="1" inputmode="numeric" value="0">
+                </label>
+                <label>
+                  <span>6m</span>
+                  <input id="length6m" name="length6m" type="number" min="0" step="1" inputmode="numeric" value="0">
+                </label>
+                <label>
+                  <span>9m</span>
+                  <input id="length9m" name="length9m" type="number" min="0" step="1" inputmode="numeric" value="0">
+                </label>
+                <label>
+                  <span>12m</span>
+                  <input id="length12m" name="length12m" type="number" min="0" step="1" inputmode="numeric" value="0">
+                </label>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button class="primary-button" type="submit" id="saveButton">
+                <span aria-hidden="true">+</span>
+                <span>Save record</span>
+              </button>
+            </div>
+          </form>
+
+          <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="records-panel" aria-labelledby="recordsTitle">
+          <div class="panel-head records-head">
+            <div>
+              <p class="eyebrow">By date</p>
+              <h2 id="recordsTitle">Record list</h2>
+            </div>
+            <button class="icon-button" type="button" id="exportButton" aria-label="Export CSV" title="Export CSV">
+              <span aria-hidden="true">CSV</span>
+            </button>
+          </div>
+
+          <div class="filter-row">
+            <label class="search-field">
+              <span>Search</span>
+              <input id="searchInput" placeholder="Project, block, point, supervisor">
+            </label>
+            <select id="projectFilter" aria-label="Filter by project">
+              <option value="">All projects</option>
+            </select>
+          </div>
+
+          <div class="report-row" aria-label="Daily report">
+            <select id="reportDate" aria-label="Daily report date">
+              <option value="">No dates</option>
+            </select>
+            <select id="reportSite" aria-label="Daily report site">
+              <option value="">All sites</option>
+            </select>
+            <select id="reportFormat" aria-label="Daily report format">
+              <option value="pdf">PDF</option>
+              <option value="word">Word</option>
+            </select>
+            <button class="secondary-button" type="button" id="reportButton">Daily report</button>
+          </div>
+
+          <div class="record-list" id="recordList"></div>
+          <div class="empty-state" id="emptyState">
+            <img src="assets/hafize-mark.svg" alt="">
+            <p>No records yet.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

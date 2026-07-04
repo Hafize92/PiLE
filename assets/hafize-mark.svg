@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Hafize">
+  <rect width="96" height="96" rx="20" fill="#0f766e"/>
+  <path d="M28 18h14v24h12V18h14v60H54V54H42v24H28z" fill="#ffffff"/>
+  <path d="M20 80h56v8H20z" fill="#f59e0b"/>
+</svg>
