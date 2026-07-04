@@ -226,6 +226,10 @@ button {
   background: #eef4ff;
 }
 
+.reset-button {
+  min-height: 38px;
+}
+
 .danger-button {
   color: var(--red);
   background: #fff2f0;
