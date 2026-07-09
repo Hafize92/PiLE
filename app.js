@@ -19,6 +19,15 @@
     length6m: document.querySelector("#length6m"),
     length9m: document.querySelector("#length9m"),
     length12m: document.querySelector("#length12m"),
+    reportNoInput: document.querySelector("#reportNoInput"),
+    pilingNoInput: document.querySelector("#pilingNoInput"),
+    pileSize: document.querySelector("#pileSize"),
+    setMm: document.querySelector("#setMm"),
+    tcMm: document.querySelector("#tcMm"),
+    penToBglMrt: document.querySelector("#penToBglMrt"),
+    cutOffLevel: document.querySelector("#cutOffLevel"),
+    payLength: document.querySelector("#payLength"),
+    remarks: document.querySelector("#remarks"),
     meterPreview: document.querySelector("#meterPreview"),
     weldingPreview: document.querySelector("#weldingPreview"),
     formMessage: document.querySelector("#formMessage"),
@@ -123,9 +132,6 @@
     if (!blockName) {
       throw new Error("Block Name is required.");
     }
-    if (!username) {
-      throw new Error("Supervisor is required.");
-    }
     if (!date) {
       throw new Error("Date must be day.month.year.");
     }
@@ -146,10 +152,6 @@
       lengths.length3m * 3 + lengths.length6m * 6 + lengths.length9m * 9 + lengths.length12m * 12;
     const totalWelding = weldingCount(totalPieces);
 
-    if (totalPieces <= 0) {
-      throw new Error("Enter at least one piling length count.");
-    }
-
     const id = recordId(projectName, blockName, pilingPointNumber, date);
     const current = state.records.find((item) => item.id === id);
     const editing = state.records.find((item) => item.id === state.editingId);
@@ -162,6 +164,15 @@
       pilingPointNumber,
       date,
       ...lengths,
+      reportNo: cleanText(els.reportNoInput.value),
+      pilingNo: cleanText(els.pilingNoInput.value),
+      pileSize: cleanText(els.pileSize.value),
+      setMm: cleanText(els.setMm.value),
+      tcMm: cleanText(els.tcMm.value),
+      penToBglMrt: cleanText(els.penToBglMrt.value),
+      cutOffLevel: cleanText(els.cutOffLevel.value),
+      payLength: cleanText(els.payLength.value),
+      remarks: cleanText(els.remarks.value),
       totalPieces,
       totalMeters,
       totalWelding,
@@ -199,6 +210,15 @@
     els.length6m.value = record.length6m;
     els.length9m.value = record.length9m;
     els.length12m.value = record.length12m;
+    els.reportNoInput.value = record.reportNo || "";
+    els.pilingNoInput.value = record.pilingNo || "";
+    els.pileSize.value = record.pileSize || "";
+    els.setMm.value = record.setMm || "";
+    els.tcMm.value = record.tcMm || "";
+    els.penToBglMrt.value = record.penToBglMrt || "";
+    els.cutOffLevel.value = record.cutOffLevel || "";
+    els.payLength.value = record.payLength || "";
+    els.remarks.value = record.remarks || "";
     els.saveButton.querySelector("span:last-child").textContent = "Update record";
     updateMeterPreview();
     clearMessage();
@@ -240,6 +260,15 @@
     els.length6m.value = "0";
     els.length9m.value = "0";
     els.length12m.value = "0";
+    els.reportNoInput.value = "";
+    els.pilingNoInput.value = "";
+    els.pileSize.value = "";
+    els.setMm.value = "";
+    els.tcMm.value = "";
+    els.penToBglMrt.value = "";
+    els.cutOffLevel.value = "";
+    els.payLength.value = "";
+    els.remarks.value = "";
     els.recordDate.value = todayInputValue();
 
     if (!options.keepContext) {
@@ -331,6 +360,13 @@
     const lengthHtml = lengthParts(record)
       .map((part) => `<span class="length-chip">${escapeHtml(part)}</span>`)
       .join("");
+    const optionalHtml = optionalRecordFields(record)
+      .map((field) => `<span class="detail-chip">${escapeHtml(field.label)}: ${escapeHtml(field.value)}</span>`)
+      .join("");
+    const measureHtml = [
+      record.totalPieces > 0 ? `<span class="welding-chip">${record.totalWelding} welding</span>` : "",
+      record.totalPieces > 0 ? `<span class="meter-chip">${record.totalMeters}m length</span>` : ""
+    ].join("");
 
     return `
       <li class="record-row">
@@ -340,10 +376,8 @@
         </div>
         <div class="record-facts" aria-label="Record details">
           <div class="record-lengths">${lengthHtml}</div>
-          <div class="record-measures">
-            <span class="welding-chip">${record.totalWelding} welding</span>
-            <span class="meter-chip">${record.totalMeters}m length</span>
-          </div>
+          <div class="record-measures">${measureHtml}</div>
+          ${optionalHtml ? `<div class="record-details">${optionalHtml}</div>` : ""}
         </div>
         <div class="record-actions">
           ${editButton}
@@ -351,6 +385,22 @@
         </div>
       </li>
     `;
+  }
+
+  function optionalRecordFields(record) {
+    return [
+      ["Report No", record.reportNo],
+      ["Piling No", record.pilingNo],
+      ["Pile Size", record.pileSize],
+      ["Set", record.setMm],
+      ["T.C.", record.tcMm],
+      ["Pen to BGL", record.penToBglMrt],
+      ["Cut Off", record.cutOffLevel],
+      ["Pay Length", record.payLength],
+      ["Remarks", record.remarks]
+    ]
+      .filter(([, value]) => cleanText(value))
+      .map(([label, value]) => ({ label, value: cleanText(value) }));
   }
 
   function groupRecordsByDate(records) {
@@ -401,7 +451,16 @@
           record.blockName,
           record.username,
           record.pilingPointNumber,
-          record.date
+          record.date,
+          record.reportNo,
+          record.pilingNo,
+          record.pileSize,
+          record.setMm,
+          record.tcMm,
+          record.penToBglMrt,
+          record.cutOffLevel,
+          record.payLength,
+          record.remarks
         ]
           .join(" ")
           .toLowerCase();
@@ -427,6 +486,15 @@
       "6m",
       "9m",
       "12m",
+      "Report No",
+      "Piling No",
+      "Pile Size",
+      "Set (mm)",
+      "T.C. (mm)",
+      "Pen to BGL (MRT)",
+      "Cut Off Level",
+      "Pay Length",
+      "Remarks",
       "Total Pieces",
       "Total Meters",
       "No. of Welding"
@@ -442,6 +510,15 @@
       record.length6m,
       record.length9m,
       record.length12m,
+      record.reportNo || "",
+      record.pilingNo || "",
+      record.pileSize || "",
+      record.setMm || "",
+      record.tcMm || "",
+      record.penToBglMrt || "",
+      record.cutOffLevel || "",
+      record.payLength || "",
+      record.remarks || "",
       record.totalPieces,
       record.totalMeters,
       record.totalWelding
@@ -498,60 +575,174 @@
   }
 
   function buildDailyReportHtml(date, site, records) {
-    const groupedSites = groupRecordsBySite(records);
-    const siteLabel = site || "All sites";
+    const pages = groupRecordsBySite(records).flatMap((group) => {
+      const chunks = chunkRecords(group.records, 26);
+      return chunks.map((chunk, index) => ({
+        site: group.site,
+        records: chunk,
+        pageNo: index + 1,
+        pageTotal: chunks.length
+      }));
+    });
 
     return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Daily Piling Report</title>
+    <title>Daily Piling Summary</title>
     <style>${reportCss()}</style>
   </head>
   <body>
-    <header>
-      <h1>Daily Piling Report</h1>
-      <p>Date: ${escapeHtml(date)} | Site: ${escapeHtml(siteLabel)}</p>
-    </header>
-    ${groupedSites.map(renderReportSite).join("")}
+    ${pages.map(renderDailySummaryPage).join("")}
   </body>
 </html>`;
   }
 
-  function renderReportSite(group) {
+  function renderDailySummaryPage(page) {
+    const reportNo = firstFilled(page.records, "reportNo");
+    const pilingNo = firstFilled(page.records, "pilingNo");
+    const rows = Array.from({ length: 26 }, (_, index) => renderDailySummaryRow(page.records[index], index));
+
     return `
-    <section class="site">
-      <h2>${escapeHtml(group.site)}</h2>
-      <table>
+    <section class="daily-summary-page">
+      <table class="form-header">
+        <tr>
+          <td class="title-cell">
+            <div>ANGKAZEN ENGINEERING SDN. BHD.</div>
+            <div>DAILY PILING SUMMARY</div>
+          </td>
+          <td class="doc-cell">
+            <div>AZE-OP :</div>
+            <div>Revision : 0</div>
+            <div>Section : OP-IS-P01</div>
+            <div>Page&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: ${escapeHtml(`${page.pageNo} of ${page.pageTotal}`)}</div>
+          </td>
+        </tr>
+      </table>
+
+      <table class="info-row">
+        <tr>
+          <td class="info-label">SITE :</td>
+          <td class="info-line">${escapeHtml(page.site)}</td>
+          <td class="info-label report-label">REPORT NO :</td>
+          <td class="info-line short-line">${escapeHtml(reportNo)}</td>
+          <td class="info-label piling-label">PILING NO :</td>
+          <td class="info-line">${escapeHtml(pilingNo)}</td>
+        </tr>
+      </table>
+
+      <table class="summary-grid">
+        <colgroup>
+          <col class="col-no">
+          <col class="col-date">
+          <col class="col-ref">
+          <col class="col-pile-size">
+          <col class="col-length">
+          <col class="col-set">
+          <col class="col-tc">
+          <col class="col-pen">
+          <col class="col-joint">
+          <col class="col-cut">
+          <col class="col-pay">
+          <col class="col-remarks">
+        </colgroup>
         <thead>
           <tr>
-            <th>No.</th>
-            <th>Piling No.</th>
-            <th>Block</th>
-            <th>Length</th>
-            <th>Welding</th>
-            <th>Meters</th>
-            <th>Supervisor</th>
+            <th>NO</th>
+            <th>DATE</th>
+            <th>REF NO</th>
+            <th>PILE<br>SIZE</th>
+            <th>PILE LENGTH USED</th>
+            <th>SET<br>MM</th>
+            <th>T.C.<br>MM</th>
+            <th>PEN<br>TO BGL<br>(MRT)</th>
+            <th>JOINT</th>
+            <th>CUT<br>OFF<br>LEVEL</th>
+            <th>PAY<br>LENGTH</th>
+            <th>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          ${group.records
-            .map(
-              (record, index) => `
-          <tr>
-            <td>${index + 1}</td>
-            <td><b>${escapeHtml(record.pilingPointNumber)}</b></td>
-            <td>${escapeHtml(record.blockName)}</td>
-            <td>${escapeHtml(recordLengthText(record))}</td>
-            <td>${record.totalWelding}</td>
-            <td>${record.totalMeters}</td>
-            <td>${escapeHtml(record.username)}</td>
-          </tr>`
-            )
-            .join("")}
+          ${rows.join("")}
         </tbody>
       </table>
+
+      <div class="remarks-line"><span>REMARKS :</span><i></i></div>
+
+      <table class="signature-grid">
+        <tr>
+          <td>
+            <div class="rep-label">ANGKAZEN REPRESENTATIVE :</div>
+            <div class="left-signature-row"><span>SIGNATURE :</span><i></i></div>
+            <div class="left-signature-row"><span>NAME&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</span><i></i></div>
+          </td>
+          <td>
+            <div class="rep-label">CLIENT'S REPRESENTATIVE :</div>
+            <div class="right-signature-row"><span>SIGNATURE :</span><i></i></div>
+          </td>
+        </tr>
+      </table>
     </section>`;
+  }
+
+  function renderDailySummaryRow(record, index) {
+    if (!record) {
+      return `
+          <tr>
+            <td>${index + 1}</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>`;
+    }
+
+    return `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(record.date)}</td>
+            <td>${escapeHtml(record.pilingPointNumber)}</td>
+            <td>${escapeHtml(record.pileSize || "")}</td>
+            <td>${escapeHtml(pileLengthUsedText(record))}</td>
+            <td>${escapeHtml(record.setMm || "")}</td>
+            <td>${escapeHtml(record.tcMm || "")}</td>
+            <td>${escapeHtml(record.penToBglMrt || "")}</td>
+            <td>${record.totalPieces > 0 ? escapeHtml(record.totalWelding) : ""}</td>
+            <td>${escapeHtml(record.cutOffLevel || "")}</td>
+            <td>${escapeHtml(record.payLength || "")}</td>
+            <td>${escapeHtml(record.remarks || "")}</td>
+          </tr>`;
+  }
+
+  function pileLengthUsedText(record) {
+    return [
+      [3, record.length3m],
+      [6, record.length6m],
+      [9, record.length9m],
+      [12, record.length12m]
+    ]
+      .flatMap(([length, count]) => Array.from({ length: intValue(count) }, () => String(length)))
+      .join("+");
+  }
+
+  function firstFilled(records, key) {
+    const record = records.find((item) => cleanText(item[key]));
+    return record ? cleanText(record[key]) : "";
+  }
+
+  function chunkRecords(records, size) {
+    const chunks = [];
+    for (let index = 0; index < records.length; index += size) {
+      chunks.push(records.slice(index, index + size));
+    }
+    return chunks.length ? chunks : [[]];
   }
 
   function groupRecordsBySite(records) {
@@ -596,37 +787,156 @@
 
   function reportCss() {
     return `
+      @page {
+        size: A4 portrait;
+        margin: 16mm 13mm 10mm;
+      }
       body {
-        color: #17211f;
-        font-family: Arial, sans-serif;
-        margin: 24px;
-      }
-      h1 {
-        font-size: 22px;
-        margin: 0 0 6px;
-      }
-      h2 {
-        color: #0b5f59;
-        font-size: 16px;
-        margin: 18px 0 8px;
-      }
-      p {
-        margin: 0 0 10px;
+        color: #111;
+        font-family: "Times New Roman", Times, serif;
+        margin: 0;
       }
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 12px;
+        table-layout: fixed;
       }
-      th,
-      td {
-        border: 1px solid #dbe3df;
-        padding: 7px;
+      .daily-summary-page {
+        break-after: page;
+        page-break-after: always;
+      }
+      .daily-summary-page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+      .form-header td,
+      .info-row td,
+      .summary-grid th,
+      .summary-grid td,
+      .signature-grid td {
+        border: 1px solid #111;
+      }
+      .form-header {
+        height: 22mm;
+      }
+      .title-cell {
+        width: 78.4%;
+        text-align: center;
+        vertical-align: middle;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.45;
+      }
+      .doc-cell {
+        width: 21.6%;
+        padding: 2mm 2.2mm;
+        font-size: 8px;
+        line-height: 1.45;
+        vertical-align: middle;
+      }
+      .info-row td {
+        height: 10mm;
+        border-top: 0;
+        font-size: 10px;
+        font-weight: 700;
+        vertical-align: middle;
+      }
+      .info-label {
+        width: 14mm;
+        border-right: 0 !important;
+        padding-left: 0.7mm;
+        white-space: nowrap;
+      }
+      .report-label {
+        width: 27mm;
+      }
+      .piling-label {
+        width: 25mm;
+      }
+      .info-line {
+        border-left: 0 !important;
+        padding: 0 2mm;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .short-line {
+        width: 22mm;
+      }
+      .summary-grid th {
+        height: 10.8mm;
+        padding: 0.7mm;
+        font-size: 7.1px;
+        line-height: 1;
+        text-align: center;
+        vertical-align: middle;
+      }
+      .summary-grid td {
+        height: 6.35mm;
+        padding: 0.6mm 0.8mm;
+        font-size: 8px;
+        line-height: 1.05;
+        text-align: center;
+        vertical-align: middle;
+      }
+      .summary-grid td:nth-child(5),
+      .summary-grid td:nth-child(12) {
         text-align: left;
+      }
+      .col-no { width: 8.4mm; }
+      .col-date { width: 15.4mm; }
+      .col-ref { width: 16mm; }
+      .col-pile-size { width: 14.8mm; }
+      .col-length { width: 37.5mm; }
+      .col-set { width: 10.2mm; }
+      .col-tc { width: 10.2mm; }
+      .col-pen { width: 11.3mm; }
+      .col-joint { width: 9.6mm; }
+      .col-cut { width: 10.4mm; }
+      .col-pay { width: 11.1mm; }
+      .col-remarks { width: 28.1mm; }
+      .remarks-line {
+        display: flex;
+        align-items: flex-end;
+        gap: 4mm;
+        height: 16mm;
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .remarks-line i,
+      .left-signature-row i,
+      .right-signature-row i {
+        display: block;
+        flex: 1 1 auto;
+        border-bottom: 1px solid #111;
+      }
+      .signature-grid {
+        height: 36mm;
+      }
+      .signature-grid td {
+        width: 50%;
+        padding: 4mm 2mm 2mm;
         vertical-align: top;
       }
-      th {
-        background: #eef4f2;
+      .rep-label {
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .left-signature-row,
+      .right-signature-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 4mm;
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .left-signature-row {
+        margin-top: 12mm;
+      }
+      .left-signature-row + .left-signature-row {
+        margin-top: 3.2mm;
+      }
+      .right-signature-row {
+        margin-top: 19mm;
       }
     `;
   }
@@ -759,6 +1069,15 @@
       length6m,
       length9m,
       length12m,
+      reportNo: cleanText(record.reportNo),
+      pilingNo: cleanText(record.pilingNo),
+      pileSize: cleanText(record.pileSize),
+      setMm: cleanText(record.setMm),
+      tcMm: cleanText(record.tcMm),
+      penToBglMrt: cleanText(record.penToBglMrt),
+      cutOffLevel: cleanText(record.cutOffLevel),
+      payLength: cleanText(record.payLength),
+      remarks: cleanText(record.remarks),
       totalPieces,
       totalMeters,
       totalWelding: weldingCount(totalPieces),

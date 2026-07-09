@@ -1,6 +1,6 @@
 # PiLE
 
-Hafize | ver `1.0.0`
+Hafize | ver `1.0.1`
 
 Mobile-first piling record app for Android and iOS users. The app runs as a dependency-free web app/PWA and stores each user's records on their own browser/device.
 
@@ -12,8 +12,9 @@ Mobile-first piling record app for Android and iOS users. The app runs as a depe
 - Piling Point Numbers
 - Calendar date input, shown in records as `day.month.year`
 - Number of piling used: 3m, 6m, 9m, 12m
+- Optional daily summary fields: report no, piling no, pile size, set mm, T.C. mm, pen to BGL (MRT), cut off level, pay length, and remarks
 
-Each record also calculates total pieces, total meters, and no. of welding per record. Zero pile lengths are hidden in the record list.
+Each record also calculates total pieces, total meters, and no. of welding per record. Zero pile lengths are hidden in the record list and blank daily summary fields stay blank in reports.
 
 Piling point numbers are normalized to `P-000` format, so `1` becomes `P-001` and `421` becomes `P-421`.
 
@@ -38,6 +39,15 @@ Collection: `pilingRecords`
   "length6m": 2,
   "length9m": 0,
   "length12m": 1,
+  "reportNo": "",
+  "pilingNo": "",
+  "pileSize": "150x150",
+  "setMm": "",
+  "tcMm": "",
+  "penToBglMrt": "",
+  "cutOffLevel": "",
+  "payLength": "",
+  "remarks": "",
   "totalPieces": 4,
   "totalMeters": 27,
   "totalWelding": 3,

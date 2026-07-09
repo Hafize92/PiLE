@@ -31,7 +31,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -259,7 +260,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--line);
@@ -270,8 +272,15 @@ select {
   outline: 0;
 }
 
+textarea {
+  min-height: 68px;
+  padding-top: 10px;
+  resize: vertical;
+}
+
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--teal);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
 }
@@ -282,6 +291,18 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfa;
+}
+
+.detail-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.detail-head {
+  margin-bottom: 12px;
 }
 
 .length-head {
@@ -435,16 +456,23 @@ select:focus {
 }
 
 .record-lengths,
-.record-measures {
+.record-measures,
+.record-details {
   display: grid;
   gap: 5px;
   align-content: start;
 }
 
+.record-details {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(94px, max-content));
+}
+
 .point-chip,
 .length-chip,
 .welding-chip,
-.meter-chip {
+.meter-chip,
+.detail-chip {
   display: inline-flex;
   align-items: center;
   min-height: 26px;
@@ -471,6 +499,11 @@ select:focus {
 .meter-chip {
   background: #fff7ed;
   color: var(--amber);
+}
+
+.detail-chip {
+  background: #f3f4f6;
+  color: #4b5563;
 }
 
 .record-actions {

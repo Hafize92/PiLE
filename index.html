@@ -7,8 +7,8 @@
     <title>PiLE</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=1.0.0-7">
-    <script defer src="app.js?v=1.0.0-7"></script>
+    <link rel="stylesheet" href="styles.css?v=1.0.1-1">
+    <script defer src="app.js?v=1.0.1-1"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -17,7 +17,7 @@
           <img class="brand-mark" src="assets/hafize-mark.svg" alt="">
           <div>
             <h1>PiLE</h1>
-            <p>ver 1.0.0</p>
+            <p>ver 1.0.1</p>
           </div>
         </div>
         <div class="sync-pill" id="syncStatus" aria-live="polite">
@@ -50,7 +50,7 @@
               </label>
               <label>
                 <span>Supervisor</span>
-                <input id="username" name="username" required placeholder="Supervisor">
+                <input id="username" name="username" placeholder="Supervisor">
               </label>
               <label>
                 <span>Date</span>
@@ -90,6 +90,50 @@
                 <label>
                   <span>12m</span>
                   <input id="length12m" name="length12m" type="number" min="0" step="1" inputmode="numeric" value="0">
+                </label>
+              </div>
+            </div>
+
+            <div class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Daily summary fields</p>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>Report No</span>
+                  <input id="reportNoInput" name="reportNoInput" placeholder="Report no">
+                </label>
+                <label>
+                  <span>Piling No</span>
+                  <input id="pilingNoInput" name="pilingNoInput" placeholder="Piling no">
+                </label>
+                <label>
+                  <span>Pile Size</span>
+                  <input id="pileSize" name="pileSize" placeholder="150x150">
+                </label>
+                <label>
+                  <span>Set (mm)</span>
+                  <input id="setMm" name="setMm" inputmode="decimal" placeholder="Set">
+                </label>
+                <label>
+                  <span>T.C. (mm)</span>
+                  <input id="tcMm" name="tcMm" inputmode="decimal" placeholder="T.C.">
+                </label>
+                <label>
+                  <span>Pen to BGL (MRT)</span>
+                  <input id="penToBglMrt" name="penToBglMrt" inputmode="decimal" placeholder="MRT">
+                </label>
+                <label>
+                  <span>Cut Off Level</span>
+                  <input id="cutOffLevel" name="cutOffLevel" placeholder="Level">
+                </label>
+                <label>
+                  <span>Pay Length</span>
+                  <input id="payLength" name="payLength" inputmode="decimal" placeholder="Length">
+                </label>
+                <label class="span-2">
+                  <span>Remarks</span>
+                  <textarea id="remarks" name="remarks" rows="2" placeholder="Remarks"></textarea>
                 </label>
               </div>
             </div>
