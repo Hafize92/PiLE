@@ -80,7 +80,7 @@
     render();
 
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.1-2").catch(() => {});
     }
   }
 

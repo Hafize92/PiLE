@@ -1,9 +1,9 @@
-const CACHE_NAME = "pile-piling-record-v8";
+const CACHE_NAME = "pile-piling-record-v9";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=1.0.1-1",
-  "./app.js?v=1.0.1-1",
+  "./styles.css?v=1.0.1-2",
+  "./app.js?v=1.0.1-2",
   "./manifest.webmanifest",
   "./assets/hafize-mark.svg"
 ];
