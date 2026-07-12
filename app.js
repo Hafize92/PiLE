@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.3";
+  const APP_VERSION = "1.0.4";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -497,12 +497,15 @@
       .map((word) => ocrWordToPile(word, mask, plan))
       .filter(Boolean)
       .filter((pile) => Number(pile.number) > 0 && Number(pile.number) < 10000);
+    const unique = uniquePiles(piles);
+    const sequenceLimit = inferSequenceLimit(unique);
+    const cleaned = sequenceLimit ? pruneSequenceOutlierPiles(unique, sequenceLimit) : unique;
 
-    return completeSequentialPiles(uniquePiles(piles), plan.gridModel).sort(sortPiles);
+    return completeSequentialPiles(cleaned, plan.gridModel, sequenceLimit).sort(sortPiles);
   }
 
-  function completeSequentialPiles(piles, gridModel) {
-    const sequenceLimit = inferSequenceLimit(piles);
+  function completeSequentialPiles(piles, gridModel, knownSequenceLimit = 0) {
+    const sequenceLimit = knownSequenceLimit || inferSequenceLimit(piles);
     if (!sequenceLimit) {
       return piles;
     }
@@ -526,7 +529,7 @@
         value,
         normalizePile({
           number: String(value),
-          grid: position ? nearestGrid({ x: position.x, top: position.y }, gridModel) : "",
+          grid: position?.grid || (position ? nearestGrid({ x: position.x, top: position.y }, gridModel) : ""),
           source: "sequence-fill",
           x: position?.x || 0,
           y: position?.y || 0,
@@ -536,6 +539,78 @@
     }
 
     return [...byNumber.values()];
+  }
+
+  function pruneSequenceOutlierPiles(piles, sequenceLimit) {
+    let current = piles;
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      const byNumber = new Map();
+      current.forEach((pile) => {
+        const value = Number(pile.number);
+        if (Number.isInteger(value) && value >= 1 && value <= sequenceLimit) {
+          byNumber.set(value, pile);
+        }
+      });
+
+      const next = current.filter((pile) => !isSequenceGridOutlier(pile, byNumber, sequenceLimit));
+      if (next.length === current.length) {
+        return current;
+      }
+      current = next;
+    }
+
+    return current;
+  }
+
+  function isSequenceGridOutlier(pile, byNumber, sequenceLimit) {
+    const value = Number(pile.number);
+    if (!Number.isInteger(value) || value < 1 || value > sequenceLimit || pile.source !== "red-ocr") {
+      return false;
+    }
+
+    const pileY = gridYNumber(pile.grid);
+    if (!Number.isFinite(pileY)) {
+      return false;
+    }
+
+    const neighbors = [];
+    for (let offset = 1; offset <= 8; offset += 1) {
+      [value - offset, value + offset].forEach((neighborValue) => {
+        const neighbor = byNumber.get(neighborValue);
+        if (!neighbor) {
+          return;
+        }
+        const neighborY = gridYNumber(neighbor.grid);
+        if (Number.isFinite(neighborY)) {
+          neighbors.push({ y: neighborY, offset });
+        }
+      });
+    }
+
+    if (neighbors.length < 4) {
+      return false;
+    }
+
+    const groups = new Map();
+    neighbors.forEach((neighbor) => {
+      const key = String(neighbor.y);
+      const group = groups.get(key) || { y: neighbor.y, count: 0, weight: 0 };
+      group.count += 1;
+      group.weight += 1 / neighbor.offset;
+      groups.set(key, group);
+    });
+
+    const strongest = [...groups.values()].sort((a, b) => b.weight - a.weight || b.count - a.count)[0];
+    const localSupport = neighbors.filter((neighbor) => Math.abs(neighbor.y - pileY) <= 1);
+    const localWeight = localSupport.reduce((sum, neighbor) => sum + 1 / neighbor.offset, 0);
+
+    return Boolean(
+      strongest &&
+        Math.abs(strongest.y - pileY) > 1 &&
+        strongest.count >= 3 &&
+        strongest.weight > Math.max(0.35, localWeight * 1.45)
+    );
   }
 
   function inferSequenceLimit(piles) {
@@ -576,11 +651,19 @@
     const lowerPile = byNumber.get(lower);
     const upperPile = byNumber.get(upper);
     if (lowerPile && upperPile) {
+      const structured = inferStructuredPilePosition(value, lower, upper, lowerPile, upperPile, byNumber);
+      if (structured) {
+        return structured;
+      }
+
       const spanValue = upper - lower || 1;
       const ratio = (value - lower) / spanValue;
+      const x = lowerPile.x + (upperPile.x - lowerPile.x) * ratio;
+      const y = lowerPile.y + (upperPile.y - lowerPile.y) * ratio;
       return {
-        x: lowerPile.x + (upperPile.x - lowerPile.x) * ratio,
-        y: lowerPile.y + (upperPile.y - lowerPile.y) * ratio,
+        x,
+        y,
+        grid: inferFilledPileGrid(value, lower, upper, lowerPile, upperPile, byNumber),
         coordinateScale: Number(lowerPile.coordinateScale) || Number(upperPile.coordinateScale) || OCR_MASK_SCALE
       };
     }
@@ -591,6 +674,165 @@
       return { x: upperPile.x, y: upperPile.y, coordinateScale: Number(upperPile.coordinateScale) || OCR_MASK_SCALE };
     }
     return null;
+  }
+
+  function inferStructuredPilePosition(value, lowerValue, upperValue, lowerPile, upperPile, byNumber) {
+    const missingCount = upperValue - lowerValue - 1;
+    const lowerGrid = splitGrid(lowerPile.grid);
+    const upperGrid = splitGrid(upperPile.grid);
+    if (missingCount < 1 || !lowerGrid.y || lowerGrid.y !== upperGrid.y) {
+      return null;
+    }
+
+    const lowerPrevious = byNumber.get(lowerValue - 1);
+    const upperNext = byNumber.get(upperValue + 1);
+    const verticalStep = inferSequenceVerticalStep(byNumber);
+
+    if (missingCount === 1) {
+      if (lowerPile.grid && lowerPile.grid === upperPile.grid && samePileColumn(lowerPile, upperPile)) {
+        if (lowerPrevious?.grid === lowerPile.grid && samePileRow(lowerPrevious, lowerPile)) {
+          return {
+            x: lowerPrevious.x,
+            y: upperPile.y,
+            grid: lowerPile.grid,
+            coordinateScale: Number(upperPile.coordinateScale) || Number(lowerPrevious.coordinateScale) || OCR_MASK_SCALE
+          };
+        }
+        if (upperNext?.grid === upperPile.grid && samePileRow(upperPile, upperNext)) {
+          return {
+            x: upperNext.x,
+            y: lowerPile.y,
+            grid: upperPile.grid,
+            coordinateScale: Number(upperNext.coordinateScale) || Number(lowerPile.coordinateScale) || OCR_MASK_SCALE
+          };
+        }
+      }
+
+      if (lowerPile.grid && lowerPile.grid !== upperPile.grid) {
+        const topLeft = byNumber.get(lowerValue - 2);
+        const topRight = byNumber.get(lowerValue - 1);
+        if (topLeft?.grid === lowerPile.grid && topRight?.grid === lowerPile.grid && samePileRow(topLeft, topRight)) {
+          const pairGap = Math.abs(topRight.x - topLeft.x);
+          const rowGap = Math.abs(lowerPile.y - topRight.y);
+          if (pairGap >= 20 && pairGap <= 120 && rowGap >= verticalStep * 0.45 && rowGap <= verticalStep * 1.55) {
+            return {
+              x: lowerPile.x + pairGap,
+              y: lowerPile.y,
+              grid: lowerPile.grid,
+              coordinateScale: Number(lowerPile.coordinateScale) || OCR_MASK_SCALE
+            };
+          }
+        }
+      }
+    }
+
+    if (!lowerPrevious || lowerPrevious.grid !== lowerPile.grid) {
+      return null;
+    }
+
+    const lowerSameColumn = samePileColumn(lowerPrevious, lowerPile);
+    const lowerSameRow = samePileRow(lowerPrevious, lowerPile);
+
+    if (missingCount === 2 && lowerSameColumn && upperNext && upperNext.grid === upperPile.grid) {
+      const lowerVerticalGap = lowerPile.y - lowerPrevious.y;
+      if (Math.abs(lowerVerticalGap) >= 16 && Math.abs(lowerVerticalGap) <= 90) {
+        const target = value === upperValue - 2 ? upperPile : upperNext;
+        return {
+          x: target.x,
+          y: target.y - lowerVerticalGap,
+          grid: upperPile.grid,
+          coordinateScale: Number(target.coordinateScale) || Number(upperPile.coordinateScale) || OCR_MASK_SCALE
+        };
+      }
+    }
+
+    if (missingCount === 2 && lowerSameRow) {
+      const target = value === lowerValue + 1 ? lowerPrevious : lowerPile;
+      return {
+        x: target.x,
+        y: target.y + verticalStep,
+        grid: lowerPile.grid,
+        coordinateScale: Number(target.coordinateScale) || Number(lowerPile.coordinateScale) || OCR_MASK_SCALE
+      };
+    }
+
+    if (missingCount === 3 && lowerSameRow) {
+      const pairGap = Math.abs(lowerPile.x - lowerPrevious.x);
+      if (pairGap >= 20 && pairGap <= 120) {
+        if (value === upperValue - 3) {
+          return {
+            x: upperPile.x - pairGap,
+            y: upperPile.y - verticalStep,
+            grid: upperPile.grid,
+            coordinateScale: Number(upperPile.coordinateScale) || OCR_MASK_SCALE
+          };
+        }
+        if (value === upperValue - 2) {
+          return {
+            x: upperPile.x,
+            y: upperPile.y - verticalStep,
+            grid: upperPile.grid,
+            coordinateScale: Number(upperPile.coordinateScale) || OCR_MASK_SCALE
+          };
+        }
+        return {
+          x: upperPile.x - pairGap,
+          y: upperPile.y,
+          grid: upperPile.grid,
+          coordinateScale: Number(upperPile.coordinateScale) || OCR_MASK_SCALE
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function inferFilledPileGrid(value, lowerValue, upperValue, lowerPile, upperPile, byNumber) {
+    if (lowerPile.grid && lowerPile.grid === upperPile.grid) {
+      return lowerPile.grid;
+    }
+
+    const lowerGrid = splitGrid(lowerPile.grid);
+    const upperGrid = splitGrid(upperPile.grid);
+    const missingCount = upperValue - lowerValue - 1;
+    if (missingCount >= 2 && lowerGrid.y && lowerGrid.y === upperGrid.y) {
+      const lowerPrevious = byNumber.get(lowerValue - 1);
+      if (lowerPrevious?.grid === lowerPile.grid) {
+        if (samePileColumn(lowerPrevious, lowerPile) && upperPile.grid) {
+          return upperPile.grid;
+        }
+        if (samePileRow(lowerPrevious, lowerPile)) {
+          return missingCount === 2 ? lowerPile.grid : upperPile.grid;
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function inferSequenceVerticalStep(byNumber) {
+    const gaps = [];
+    const piles = [...byNumber.values()];
+    for (let first = 0; first < piles.length; first += 1) {
+      for (let second = first + 1; second < piles.length; second += 1) {
+        if (piles[first].grid !== piles[second].grid || !samePileColumn(piles[first], piles[second])) {
+          continue;
+        }
+        const gap = Math.abs(piles[first].y - piles[second].y);
+        if (gap >= 16 && gap <= 90) {
+          gaps.push(gap);
+        }
+      }
+    }
+    return median(gaps) || 41;
+  }
+
+  function samePileColumn(a, b) {
+    return Math.abs(Number(a.x) - Number(b.x)) <= 18;
+  }
+
+  function samePileRow(a, b) {
+    return Math.abs(Number(a.y) - Number(b.y)) <= 18;
   }
 
   function buildRedOcrCanvas(sourceImageData, box) {
@@ -1565,7 +1807,7 @@
           pile,
           latest,
           point,
-          text: `${shortDate(latest.date)} ${cleanText(latest.penetrationDepth)}`
+          text: `${shortDate(latest.date)} ${formatDepthMeters(latest.penetrationDepth)}`
         };
       })
       .filter(Boolean)
@@ -1585,33 +1827,79 @@
       const textWidth = Math.max(font.widthOfTextAtSize(item.text, fontSize), 18);
       const label = placeAnnotationLabel(item.point, textWidth, lineHeight, geometry.display, occupied, pileKeepouts);
       occupied.push(label.rect);
-      const pilePoint = displayToPdfPoint(item.point, geometry);
-      const anchorPoint = displayToPdfPoint({ x: label.anchorX, y: label.anchorY }, geometry);
-      const textPoint = displayToPdfPoint({ x: label.x, y: label.y }, geometry);
 
-      page.drawLine({
-        start: pilePoint,
-        end: anchorPoint,
-        thickness: 0.45,
-        color: blue,
-        opacity: 0.82
-      });
+      drawDisplayArrowToPile(page, geometry, { x: label.anchorX, y: label.anchorY }, item.point, blue);
       page.drawCircle({
-        x: pilePoint.x,
-        y: pilePoint.y,
+        ...displayToPdfPoint(item.point, geometry),
         size: Math.max(1.1, fontSize * 0.22),
         color: blue,
         opacity: 0.9
       });
-      page.drawText(item.text, {
-        x: textPoint.x,
-        y: textPoint.y,
-        size: fontSize,
-        font,
-        color: blue,
-        opacity: 0.96,
-        rotate: textRotation
+      [
+        [-0.65, 0],
+        [0.65, 0],
+        [0, -0.65],
+        [0, 0.65]
+      ].forEach(([offsetX, offsetY]) => {
+        drawDisplayText(page, geometry, item.text, label.x + offsetX, label.y + offsetY, fontSize, font, PDFLib.rgb(1, 1, 1), 0.9, textRotation);
       });
+      drawDisplayText(page, geometry, item.text, label.x, label.y, fontSize, font, blue, 0.96, textRotation);
+    });
+  }
+
+  function drawDisplayArrowToPile(page, geometry, start, end, color) {
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (distance < 0.1) {
+      return;
+    }
+
+    const unitX = (end.x - start.x) / distance;
+    const unitY = (end.y - start.y) / distance;
+    const arrowLength = 5.5;
+    const arrowWidth = 3.2;
+    const lineEnd = {
+      x: end.x - unitX * 1.4,
+      y: end.y - unitY * 1.4
+    };
+    const base = {
+      x: end.x - unitX * arrowLength,
+      y: end.y - unitY * arrowLength
+    };
+    const normal = { x: -unitY, y: unitX };
+    const left = {
+      x: base.x + normal.x * arrowWidth,
+      y: base.y + normal.y * arrowWidth
+    };
+    const right = {
+      x: base.x - normal.x * arrowWidth,
+      y: base.y - normal.y * arrowWidth
+    };
+
+    drawDisplayLine(page, geometry, start, lineEnd, color, 0.48, 0.84);
+    drawDisplayLine(page, geometry, left, end, color, 0.48, 0.9);
+    drawDisplayLine(page, geometry, right, end, color, 0.48, 0.9);
+  }
+
+  function drawDisplayLine(page, geometry, start, end, color, thickness, opacity) {
+    page.drawLine({
+      start: displayToPdfPoint(start, geometry),
+      end: displayToPdfPoint(end, geometry),
+      thickness,
+      color,
+      opacity
+    });
+  }
+
+  function drawDisplayText(page, geometry, text, x, y, size, font, color, opacity, rotate) {
+    const point = displayToPdfPoint({ x, y }, geometry);
+    page.drawText(text, {
+      x: point.x,
+      y: point.y,
+      size,
+      font,
+      color,
+      opacity,
+      rotate
     });
   }
 
@@ -1724,10 +2012,10 @@
 
   function pileAnnotationKeepout(point) {
     return {
-      x0: point.x - 24,
-      y0: point.y - 16,
-      x1: point.x + 24,
-      y1: point.y + 16
+      x0: point.x - 34,
+      y0: point.y - 22,
+      x1: point.x + 34,
+      y1: point.y + 22
     };
   }
 
@@ -1761,7 +2049,7 @@
 
   function annotationCandidates(point, width, height) {
     const candidates = [];
-    [8, 16, 26, 40, 58].forEach((gap) => {
+    [28, 46, 70, 100, 138, 180].forEach((gap) => {
       candidates.push({ x: point.x + gap, y: point.y + gap * 0.25 });
       candidates.push({ x: point.x - width - gap, y: point.y + gap * 0.25 });
       candidates.push({ x: point.x + gap, y: point.y - height - gap * 0.25 });
@@ -1903,6 +2191,11 @@
       };
     }
     return { x: text, y: "" };
+  }
+
+  function gridYNumber(grid) {
+    const value = Number(splitGrid(grid).y);
+    return Number.isFinite(value) ? value : NaN;
   }
 
   function composeGrid(x, y) {
@@ -2099,7 +2392,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.3").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.4").catch(() => {});
     }
   }
 
@@ -2231,8 +2524,17 @@
     if (!date) {
       return cleanText(value);
     }
-    const [, month, day] = date.split("-");
-    return `${day}/${month}`;
+    const [year, month, day] = date.split("-");
+    return `${Number(day)}/${Number(month)}/${year.slice(-2)}`;
+  }
+
+  function formatDepthMeters(value) {
+    const text = cleanText(value);
+    if (!text) {
+      return "";
+    }
+    const compact = text.replace(/\s+/g, "");
+    return /m$/i.test(compact) ? compact.replace(/m$/i, "m") : `${compact}m`;
   }
 
   function titleFromFileName(fileName) {
@@ -2257,6 +2559,15 @@
 
   function average(values) {
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  }
+
+  function median(values) {
+    if (!values.length) {
+      return 0;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   }
 
   function clamp(value, min, max) {

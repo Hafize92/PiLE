@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.3`
+Ver `1.0.4`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -36,6 +36,7 @@ The app uses PDF.js to render page 1 of the drawing in the browser, then:
 - Detects Y-axis grid lines from the left-side grid extension and labels them `1, 2, 3...`.
 - Runs digit-only OCR on the red pile-number labels.
 - When a dense sequence such as `1..464` is detected, drops OCR outliers and fills missed sequence numbers by interpolating from nearby detected labels.
+- Rejects sequence outliers where a red OCR result lands on the wrong grid row, such as low pile numbers misread from the 400-series area.
 
 All extracted pile numbers and grids remain editable in the review table.
 
@@ -44,8 +45,9 @@ All extracted pile numbers and grids remain editable in the review table.
 When exporting PDF after saving progress records:
 
 - Each recorded pile with a detected drawing coordinate gets a compact blue note beside the pile point.
-- The note uses `DD/MM depth`, for example `12/07 18.2m`.
-- Notes are offset from the pile point and collision-checked so they do not stack directly on top of each other.
+- The note uses `D/M/YY depth`, for example `12/7/26 18.2m`.
+- Depth values are written in metres with `m`.
+- Notes are offset from the pile point, collision-checked, and connected with blue arrows pointing to the exact pile point.
 - Piles added manually without drawing coordinates still appear in the summary pages.
 
 ## Local Data
@@ -61,7 +63,7 @@ Records are stored locally in the user's browser:
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.3`
+- Minor revision: `Ver1.0.4`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.
