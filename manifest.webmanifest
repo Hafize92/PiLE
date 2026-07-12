@@ -1,11 +1,11 @@
 {
-  "name": "PiLE",
-  "short_name": "PiLE",
-  "description": "Mobile piling record app for project, block, point, user, date, and piling length counts.",
-  "start_url": "./index.html?v=1.0.1-2",
+  "name": "AkZ Piling Status",
+  "short_name": "AkZ Status",
+  "description": "Local-first PDF piling status tracker for grid, pile number, piling date, and penetration depth records.",
+  "start_url": "./index.html?v=1.0.0",
   "display": "standalone",
-  "background_color": "#f6f7f3",
-  "theme_color": "#0f766e",
+  "background_color": "#f4f7f8",
+  "theme_color": "#164e63",
   "icons": [
     {
       "src": "assets/hafize-mark.svg",

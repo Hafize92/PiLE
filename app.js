@@ -1,1253 +1,1440 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "pile:piling-records:v1";
-  const LEGACY_STORAGE_KEY = "hafize:piling-records:v1";
-  const PROFILE_KEY = "pile:profile:v1";
-  const LEGACY_PROFILE_KEY = "hafize:profile:v1";
-  const DEVICE_KEY = "pile:device-id:v1";
-  const currentDeviceId = getDeviceId();
+  const APP_VERSION = "1.0.0";
+  const STORAGE_KEY = "akz:piling-status:v1";
+  const DB_NAME = "akz-piling-status";
+  const DB_VERSION = 1;
+  const PDFJS_SCRIPT = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+  const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const PDFLIB_SCRIPT = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
 
   const els = {
-    form: document.querySelector("#recordForm"),
-    projectName: document.querySelector("#projectName"),
-    blockName: document.querySelector("#blockName"),
-    username: document.querySelector("#username"),
-    recordDate: document.querySelector("#recordDate"),
-    pilingPointNumber: document.querySelector("#pilingPointNumber"),
-    length3m: document.querySelector("#length3m"),
-    length6m: document.querySelector("#length6m"),
-    length9m: document.querySelector("#length9m"),
-    length12m: document.querySelector("#length12m"),
-    reportNoInput: document.querySelector("#reportNoInput"),
-    pilingNoInput: document.querySelector("#pilingNoInput"),
-    pileSize: document.querySelector("#pileSize"),
-    setMm: document.querySelector("#setMm"),
-    tcMm: document.querySelector("#tcMm"),
-    penToBglMrt: document.querySelector("#penToBglMrt"),
-    cutOffLevel: document.querySelector("#cutOffLevel"),
-    payLength: document.querySelector("#payLength"),
-    remarks: document.querySelector("#remarks"),
-    meterPreview: document.querySelector("#meterPreview"),
-    weldingPreview: document.querySelector("#weldingPreview"),
-    formMessage: document.querySelector("#formMessage"),
-    saveButton: document.querySelector("#saveButton"),
-    resetButton: document.querySelector("#resetButton"),
-    exportButton: document.querySelector("#exportButton"),
-    searchInput: document.querySelector("#searchInput"),
-    projectFilter: document.querySelector("#projectFilter"),
-    reportDate: document.querySelector("#reportDate"),
-    reportSite: document.querySelector("#reportSite"),
-    reportFormat: document.querySelector("#reportFormat"),
-    reportButton: document.querySelector("#reportButton"),
-    recordList: document.querySelector("#recordList"),
+    pdfInput: document.querySelector("#pdfInput"),
+    drawingSelect: document.querySelector("#drawingSelect"),
+    deleteDrawingButton: document.querySelector("#deleteDrawingButton"),
+    projectTitle: document.querySelector("#projectTitle"),
+    drawingTitle: document.querySelector("#drawingTitle"),
+    gridLetters: document.querySelector("#gridLetters"),
+    gridNumbers: document.querySelector("#gridNumbers"),
+    saveDrawingButton: document.querySelector("#saveDrawingButton"),
+    exportCsvButton: document.querySelector("#exportCsvButton"),
+    exportPdfButton: document.querySelector("#exportPdfButton"),
+    clearDataButton: document.querySelector("#clearDataButton"),
+    appMessage: document.querySelector("#appMessage"),
+    totalPiles: document.querySelector("#totalPiles"),
+    recordedPiles: document.querySelector("#recordedPiles"),
+    pendingPiles: document.querySelector("#pendingPiles"),
+    progressPercent: document.querySelector("#progressPercent"),
+    recordForm: document.querySelector("#recordForm"),
+    gridSelect: document.querySelector("#gridSelect"),
+    pileSelect: document.querySelector("#pileSelect"),
+    pilingDate: document.querySelector("#pilingDate"),
+    penetrationDepth: document.querySelector("#penetrationDepth"),
+    recordRemarks: document.querySelector("#recordRemarks"),
+    resetEntryButton: document.querySelector("#resetEntryButton"),
+    pileHistory: document.querySelector("#pileHistory"),
+    pileSearch: document.querySelector("#pileSearch"),
+    addPileButton: document.querySelector("#addPileButton"),
+    rangeStart: document.querySelector("#rangeStart"),
+    rangeEnd: document.querySelector("#rangeEnd"),
+    rangePrefix: document.querySelector("#rangePrefix"),
+    rangeGrid: document.querySelector("#rangeGrid"),
+    addRangeButton: document.querySelector("#addRangeButton"),
+    statusBody: document.querySelector("#statusBody"),
     emptyState: document.querySelector("#emptyState"),
-    syncStatus: document.querySelector("#syncStatus")
+    storageStatus: document.querySelector("#storageStatus")
   };
 
-  const state = {
-    records: loadRecords(),
-    editingId: "",
-    channel: null
-  };
+  const state = loadAppState();
+  let pdfJsPromise = null;
+  let pdfLibPromise = null;
+  let dbPromise = null;
 
   init();
 
   function init() {
-    hydrateProfile();
-    setupBroadcastChannel();
-    setSyncStatus("local", "Local");
-    els.recordDate.value = todayInputValue();
+    els.pilingDate.value = todayInputValue();
 
-    els.form.addEventListener("submit", handleSubmit);
-    els.resetButton.addEventListener("click", resetForm);
-    els.exportButton.addEventListener("click", exportCsv);
-    els.reportButton.addEventListener("click", exportDailyReport);
-    els.searchInput.addEventListener("input", render);
-    els.projectFilter.addEventListener("change", render);
-    els.pilingPointNumber.addEventListener("blur", formatPilingPointField);
-    els.pilingPointNumber.addEventListener("change", formatPilingPointField);
-
-    [els.length3m, els.length6m, els.length9m, els.length12m].forEach((input) => {
-      input.addEventListener("input", updateMeterPreview);
+    els.pdfInput.addEventListener("change", handlePdfUpload);
+    els.drawingSelect.addEventListener("change", handleDrawingChange);
+    els.deleteDrawingButton.addEventListener("click", deleteActiveDrawing);
+    els.saveDrawingButton.addEventListener("click", saveDrawingEdits);
+    els.exportCsvButton.addEventListener("click", exportCsv);
+    els.exportPdfButton.addEventListener("click", exportEmbeddedPdf);
+    els.clearDataButton.addEventListener("click", clearAllData);
+    els.recordForm.addEventListener("submit", saveProgressRecord);
+    els.resetEntryButton.addEventListener("click", resetEntryForm);
+    els.gridSelect.addEventListener("change", () => {
+      renderPileSelect();
+      renderHistory();
     });
+    els.pileSelect.addEventListener("change", renderHistory);
+    els.pileSearch.addEventListener("input", renderStatusTable);
+    els.addPileButton.addEventListener("click", addSinglePile);
+    els.addRangeButton.addEventListener("click", addPileRange);
+    els.statusBody.addEventListener("click", handleStatusClick);
+    els.statusBody.addEventListener("change", handleStatusChange);
+    els.pileHistory.addEventListener("click", handleStatusClick);
 
-    [els.projectName, els.blockName, els.username].forEach((input) => {
-      input.addEventListener("input", persistProfile);
-    });
-
-    updateMeterPreview();
     render();
+    registerServiceWorker();
+  }
 
-    if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.1-2").catch(() => {});
+  function loadAppState() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      return {
+        activeDrawingId: cleanText(parsed.activeDrawingId),
+        drawings: Array.isArray(parsed.drawings) ? parsed.drawings.map(normalizeDrawing).filter(Boolean) : [],
+        records: Array.isArray(parsed.records) ? parsed.records.map(normalizeRecord).filter(Boolean) : []
+      };
+    } catch (error) {
+      return { activeDrawingId: "", drawings: [], records: [] };
     }
   }
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    clearMessage();
+  function persist() {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: APP_VERSION,
+        activeDrawingId: state.activeDrawingId,
+        drawings: state.drawings,
+        records: state.records
+      })
+    );
+  }
 
-    let record;
-    const previousId = state.editingId;
-
-    try {
-      record = readFormRecord();
-    } catch (error) {
-      showMessage(error.message, true);
+  async function handlePdfUpload(event) {
+    const files = Array.from(event.target.files || []).filter((file) => file.type === "application/pdf" || /\.pdf$/i.test(file.name));
+    if (!files.length) {
       return;
     }
 
-    const existing = state.records.find((item) => item.id === record.id);
-    const previousRecord = previousId ? state.records.find((item) => item.id === previousId) : null;
-    if (previousRecord && previousId !== record.id && !canDeleteRecord(previousRecord)) {
-      showMessage("Only this PC can change the point or date for this record.", true);
-      return;
-    }
+    showMessage(`Reading ${files.length} PDF file${files.length === 1 ? "" : "s"}...`);
+    let imported = 0;
+    let manualReview = false;
 
-    if (existing && previousId !== record.id) {
-      const ok = window.confirm("This point and date already exists. Update it?");
-      if (!ok) {
-        return;
+    for (const file of files) {
+      const buffer = await file.arrayBuffer();
+      let extracted = null;
+
+      try {
+        extracted = await extractPdfInfo(buffer.slice(0), file.name);
+      } catch (error) {
+        extracted = fallbackExtraction(file.name);
+        manualReview = true;
+      }
+
+      const drawing = normalizeDrawing({
+        id: uniqueId("drawing"),
+        fileName: file.name,
+        projectTitle: extracted.projectTitle,
+        drawingTitle: extracted.drawingTitle,
+        pageCount: extracted.pageCount,
+        gridLetters: extracted.gridLetters,
+        gridNumbers: extracted.gridNumbers,
+        piles: extracted.piles,
+        importedAt: Date.now(),
+        updatedAt: Date.now(),
+        extractionNote: extracted.extractionNote || ""
+      });
+
+      try {
+        await savePdfBytes(drawing.id, buffer);
+        drawing.pdfStored = true;
+      } catch (error) {
+        drawing.pdfStored = false;
+        manualReview = true;
+      }
+
+      state.drawings = [drawing, ...state.drawings.filter((item) => item.fileName !== drawing.fileName)];
+      state.activeDrawingId = drawing.id;
+      imported += 1;
+
+      if (!drawing.piles.length) {
+        manualReview = true;
       }
     }
 
-    upsertLocalRecord(record, previousId);
-    persistProfile();
-    notifyPeers();
-    resetForm({ keepContext: true });
-    showMessage("Record saved locally.");
+    persist();
+    event.target.value = "";
+    render();
+    showMessage(
+      manualReview
+        ? `${imported} PDF imported. Review or add pile numbers before recording.`
+        : `${imported} PDF imported and ready.`
+    );
   }
 
-  function readFormRecord() {
-    const projectName = cleanText(els.projectName.value);
-    const blockName = cleanText(els.blockName.value);
-    const username = cleanText(els.username.value);
-    const date = normalizeDateInput(els.recordDate.value);
-    const pilingPointNumber = formatPilingPoint(els.pilingPointNumber.value);
+  async function extractPdfInfo(buffer, fileName) {
+    const pdfjsLib = await ensurePdfJs();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const items = [];
 
-    if (!projectName) {
-      throw new Error("Project Name is required.");
+    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
+      const page = await pdf.getPage(pageNo);
+      const viewport = page.getViewport({ scale: 1 });
+      const textContent = await page.getTextContent();
+      textContent.items.forEach((item) => {
+        const text = cleanText(item.str);
+        if (!text) {
+          return;
+        }
+        const transform = item.transform || [1, 0, 0, 1, 0, 0];
+        const x = Number(transform[4]) || 0;
+        const y = Number(transform[5]) || 0;
+        const width = Number(item.width) || 0;
+        const height = Number(item.height) || Math.abs(Number(transform[3])) || 8;
+        items.push({
+          text,
+          pageNo,
+          x,
+          y,
+          right: x + width,
+          top: viewport.height - y,
+          height,
+          pageWidth: viewport.width,
+          pageHeight: viewport.height
+        });
+      });
     }
-    if (!blockName) {
-      throw new Error("Block Name is required.");
-    }
-    if (!date) {
-      throw new Error("Date must be day.month.year.");
-    }
-    if (!pilingPointNumber) {
-      throw new Error("Piling Point Numbers must be a number.");
-    }
-    els.pilingPointNumber.value = pilingPointNumber;
 
-    const lengths = {
-      length3m: intValue(els.length3m.value),
-      length6m: intValue(els.length6m.value),
-      length9m: intValue(els.length9m.value),
-      length12m: intValue(els.length12m.value)
-    };
-
-    const totalPieces = lengths.length3m + lengths.length6m + lengths.length9m + lengths.length12m;
-    const totalMeters =
-      lengths.length3m * 3 + lengths.length6m * 6 + lengths.length9m * 9 + lengths.length12m * 12;
-    const totalWelding = weldingCount(totalPieces);
-
-    const id = recordId(projectName, blockName, pilingPointNumber, date);
-    const current = state.records.find((item) => item.id === id);
-    const editing = state.records.find((item) => item.id === state.editingId);
+    const lines = buildTextLines(items);
+    const metadata = extractMetadata(lines, fileName);
+    const gridModel = detectGridModel(items);
+    const piles = extractPileRows(items, gridModel);
 
     return {
-      id,
-      projectName,
-      blockName,
-      username,
-      pilingPointNumber,
-      date,
-      ...lengths,
-      reportNo: cleanText(els.reportNoInput.value),
-      pilingNo: cleanText(els.pilingNoInput.value),
-      pileSize: cleanText(els.pileSize.value),
-      setMm: cleanText(els.setMm.value),
-      tcMm: cleanText(els.tcMm.value),
-      penToBglMrt: cleanText(els.penToBglMrt.value),
-      cutOffLevel: cleanText(els.cutOffLevel.value),
-      payLength: cleanText(els.payLength.value),
-      remarks: cleanText(els.remarks.value),
-      totalPieces,
-      totalMeters,
-      totalWelding,
-      ownerDeviceId: current?.ownerDeviceId || editing?.ownerDeviceId || currentDeviceId,
-      ownerUid: current?.ownerUid || editing?.ownerUid || "",
-      createdAt: current?.createdAt || editing?.createdAt || Date.now(),
-      updatedAt: Date.now()
+      projectTitle: metadata.projectTitle,
+      drawingTitle: metadata.drawingTitle,
+      pageCount: pdf.numPages,
+      gridLetters: gridModel.letters.map((item) => item.label),
+      gridNumbers: gridModel.numbers.map((item) => item.label),
+      piles,
+      extractionNote: piles.length ? "" : "No pile-number text was found in the PDF text layer."
     };
   }
 
-  function upsertLocalRecord(record, previousId) {
-    const nextRecords = state.records.filter((item) => item.id !== record.id && item.id !== previousId);
-    state.records = [record, ...nextRecords];
-    persistRecords();
+  function fallbackExtraction(fileName) {
+    return {
+      projectTitle: titleFromFileName(fileName),
+      drawingTitle: titleFromFileName(fileName),
+      pageCount: 0,
+      gridLetters: [],
+      gridNumbers: [],
+      piles: [],
+      extractionNote: "PDF text extraction was not available."
+    };
+  }
+
+  function buildTextLines(items) {
+    const sorted = [...items].sort((a, b) => {
+      if (a.pageNo !== b.pageNo) {
+        return a.pageNo - b.pageNo;
+      }
+      if (Math.abs(a.top - b.top) > 3) {
+        return a.top - b.top;
+      }
+      return a.x - b.x;
+    });
+    const lines = [];
+
+    sorted.forEach((item) => {
+      const last = lines[lines.length - 1];
+      const sameLine = last && last.pageNo === item.pageNo && Math.abs(last.top - item.top) <= Math.max(4, item.height * 0.8);
+      if (sameLine) {
+        last.items.push(item);
+        last.top = (last.top + item.top) / 2;
+        return;
+      }
+      lines.push({ pageNo: item.pageNo, top: item.top, items: [item] });
+    });
+
+    return lines.map((line) => {
+      const lineItems = [...line.items].sort((a, b) => a.x - b.x);
+      let text = "";
+      let previous = null;
+      lineItems.forEach((item) => {
+        const gap = previous ? item.x - previous.right : 0;
+        const spacer = previous && gap > Math.max(1.5, item.height * 0.25) ? " " : "";
+        text += `${spacer}${item.text}`;
+        previous = item;
+      });
+      return { ...line, text: cleanText(text) };
+    });
+  }
+
+  function extractMetadata(lines, fileName) {
+    const projectTitle =
+      collectAfterLabel(lines, /PROJECT\s*TITLE|TAJUK\s*PROJEK/i, /DRAWING\s*TITLE|FASA|PHASE|CONTRACTOR|CLIENT|LICENSED/i, 6) ||
+      findProjectLine(lines) ||
+      titleFromFileName(fileName);
+    const drawingTitle =
+      collectAfterLabel(lines, /DRAWING\s*TITLE|TAJUK\s*LUKISAN/i, /CHECKED|SURVEYED|DRAWN|SCALE|DATE|DRAWING\s*NO|REV/i, 5) ||
+      findDrawingTitleLine(lines) ||
+      titleFromFileName(fileName);
+
+    return {
+      projectTitle: cleanTitle(projectTitle),
+      drawingTitle: cleanTitle(drawingTitle)
+    };
+  }
+
+  function collectAfterLabel(lines, labelPattern, stopPattern, maxLines) {
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].text;
+      if (!labelPattern.test(line)) {
+        continue;
+      }
+
+      const parts = [];
+      const after = cleanTitle(line.replace(labelPattern, "").replace(/^[/:\s-]+/, ""));
+      if (isUsefulTitlePart(after)) {
+        parts.push(after);
+      }
+
+      for (let next = index + 1; next < lines.length && parts.length < maxLines; next += 1) {
+        const text = cleanTitle(lines[next].text);
+        if (!text || stopPattern.test(text)) {
+          break;
+        }
+        if (isUsefulTitlePart(text)) {
+          parts.push(text);
+        }
+      }
+
+      if (parts.length) {
+        return parts.join(" ");
+      }
+    }
+    return "";
+  }
+
+  function findProjectLine(lines) {
+    const line = lines.find((item) => /PEMBINAAN|DEVELOPMENT|PROJECT|CADANGAN/i.test(item.text));
+    return line ? line.text : "";
+  }
+
+  function findDrawingTitleLine(lines) {
+    const candidates = lines
+      .map((line) => line.text)
+      .filter((text) => /PILING/i.test(text) && /PLAN/i.test(text))
+      .sort((a, b) => b.length - a.length);
+    return candidates[0] || "";
+  }
+
+  function isUsefulTitlePart(value) {
+    if (!value || value.length < 3) {
+      return false;
+    }
+    return !/^(NO\.?|REV\.?|DATE|NAME|POSITION|SIGNATURE|PAGE|SECTION|AMENDMENTS?|NOTES?|LEGENDS?)\b/i.test(value);
+  }
+
+  function detectGridModel(items) {
+    const pageItems = items.filter((item) => item.pageNo === 1);
+    const pageWidth = pageItems[0]?.pageWidth || 0;
+    const pageHeight = pageItems[0]?.pageHeight || 0;
+    const letters = detectGridLetters(pageItems, pageWidth);
+    const numbers = detectGridNumbers(pageItems, pageHeight);
+    return { letters, numbers, pageWidth, pageHeight };
+  }
+
+  function detectGridLetters(items, pageWidth) {
+    const letterItems = items.filter((item) => /^[A-Z]$/.test(item.text) && item.height >= 3 && item.height <= 30);
+    const rowGroups = groupClose(letterItems, "top", 10)
+      .map((group) => uniquePositionLabels(group, "x"))
+      .filter((group) => group.length >= 4 && span(group.map((item) => item.x)) > pageWidth * 0.2);
+
+    if (!rowGroups.length) {
+      return [];
+    }
+
+    const best = rowGroups.sort((a, b) => scoreLetterGroup(b, pageWidth) - scoreLetterGroup(a, pageWidth))[0];
+    return best
+      .sort((a, b) => a.x - b.x)
+      .map((item) => ({ label: item.text, x: item.x, top: item.top }));
+  }
+
+  function detectGridNumbers(items, pageHeight) {
+    const numberItems = items.filter((item) => /^(?:[1-9]|1[0-9]|2[0-9]|30)$/.test(item.text) && item.height >= 3 && item.height <= 30);
+    const columnGroups = groupClose(numberItems, "x", 12)
+      .map((group) => uniquePositionLabels(group, "top"))
+      .filter((group) => group.length >= 4 && span(group.map((item) => item.top)) > pageHeight * 0.18);
+
+    if (!columnGroups.length) {
+      return [];
+    }
+
+    const best = columnGroups.sort((a, b) => scoreNumberGroup(b) - scoreNumberGroup(a))[0];
+    return best
+      .sort((a, b) => Number(a.text) - Number(b.text))
+      .map((item) => ({ label: item.text, x: item.x, top: item.top }));
+  }
+
+  function scoreLetterGroup(group, pageWidth) {
+    return group.length * 10 + span(group.map((item) => item.x)) / Math.max(pageWidth, 1);
+  }
+
+  function scoreNumberGroup(group) {
+    const leftBonus = 1000 / Math.max(100, average(group.map((item) => item.x)));
+    return group.length * 10 + leftBonus;
+  }
+
+  function extractPileRows(items, gridModel) {
+    const numberItems = items
+      .filter((item) => item.pageNo === 1)
+      .filter((item) => /^\d{1,4}$/.test(item.text))
+      .filter((item) => Number(item.text) > 0 && Number(item.text) <= 9999)
+      .filter((item) => isInsideGridBounds(item, gridModel));
+
+    const byNumber = new Map();
+    numberItems.forEach((item) => {
+      const value = Number(item.text);
+      if (!byNumber.has(value)) {
+        byNumber.set(value, item);
+      }
+    });
+
+    const bestRun = longestConsecutiveRun([...byNumber.keys()].sort((a, b) => a - b));
+    if (bestRun.length >= 20) {
+      return bestRun.map((value) => {
+        const item = byNumber.get(value);
+        return normalizePile({
+          number: String(value),
+          grid: nearestGrid(item, gridModel),
+          source: "pdf-text",
+          x: item.x,
+          y: item.y
+        });
+      });
+    }
+
+    const explicit = extractExplicitPileLabels(items, gridModel);
+    if (explicit.length >= 8 || explicit.some((pile) => !/^PT\b/i.test(pile.number))) {
+      return explicit;
+    }
+
+    return [];
+  }
+
+  function extractExplicitPileLabels(items, gridModel) {
+    const lines = buildTextLines(items.filter((item) => item.pageNo === 1));
+    const matches = [];
+    lines.forEach((line) => {
+      const regex = /\b((?:P|BP|CP|PILE|PT)\s*-?\s*\d{1,5})\b/gi;
+      let match = regex.exec(line.text);
+      while (match) {
+        const firstItem = line.items[0];
+        matches.push(
+          normalizePile({
+            number: cleanText(match[1]).replace(/\s+/g, " ").toUpperCase(),
+            grid: nearestGrid(firstItem, gridModel),
+            source: "pdf-text",
+            x: firstItem?.x || 0,
+            y: firstItem?.y || 0
+          })
+        );
+        match = regex.exec(line.text);
+      }
+    });
+    return uniquePiles(matches);
+  }
+
+  function isInsideGridBounds(item, gridModel) {
+    if (!gridModel.letters.length || !gridModel.numbers.length) {
+      return true;
+    }
+    const letterX = gridModel.letters.map((grid) => grid.x);
+    const numberTop = gridModel.numbers.map((grid) => grid.top);
+    const xMin = Math.min(...letterX) - 140;
+    const xMax = Math.max(...letterX) + 140;
+    const topMin = Math.min(...gridModel.letters.map((grid) => grid.top), ...numberTop) - 80;
+    const topMax = Math.max(...numberTop) + 80;
+    return item.x >= xMin && item.x <= xMax && item.top >= topMin && item.top <= topMax;
+  }
+
+  function nearestGrid(item, gridModel) {
+    if (!item || !gridModel.letters.length || !gridModel.numbers.length) {
+      return "";
+    }
+    const letter = nearestBy(gridModel.letters, item.x, "x");
+    const number = nearestBy(gridModel.numbers, item.top, "top");
+    return letter && number ? `${letter.label}/${number.label}` : "";
+  }
+
+  function handleDrawingChange() {
+    state.activeDrawingId = els.drawingSelect.value;
+    persist();
+    resetEntryForm();
     render();
   }
 
-  function editRecord(recordIdValue) {
-    const record = state.records.find((item) => item.id === recordIdValue);
-    if (!record) {
-      return;
-    }
-    if (!canDeleteRecord(record)) {
-      showMessage("Only this device can edit this record.", true);
+  function saveDrawingEdits() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload a PDF first.", true);
       return;
     }
 
-    state.editingId = record.id;
-    els.projectName.value = record.projectName;
-    els.blockName.value = record.blockName;
-    els.username.value = record.username;
-    els.recordDate.value = dateInputValue(record.date);
-    els.pilingPointNumber.value = record.pilingPointNumber;
-    els.length3m.value = record.length3m;
-    els.length6m.value = record.length6m;
-    els.length9m.value = record.length9m;
-    els.length12m.value = record.length12m;
-    els.reportNoInput.value = record.reportNo || "";
-    els.pilingNoInput.value = record.pilingNo || "";
-    els.pileSize.value = record.pileSize || "";
-    els.setMm.value = record.setMm || "";
-    els.tcMm.value = record.tcMm || "";
-    els.penToBglMrt.value = record.penToBglMrt || "";
-    els.cutOffLevel.value = record.cutOffLevel || "";
-    els.payLength.value = record.payLength || "";
-    els.remarks.value = record.remarks || "";
-    els.saveButton.querySelector("span:last-child").textContent = "Update record";
-    updateMeterPreview();
-    clearMessage();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    drawing.projectTitle = cleanText(els.projectTitle.value) || drawing.projectTitle;
+    drawing.drawingTitle = cleanText(els.drawingTitle.value) || drawing.drawingTitle;
+    drawing.gridLetters = parseList(els.gridLetters.value);
+    drawing.gridNumbers = parseList(els.gridNumbers.value);
+    drawing.updatedAt = Date.now();
+    persist();
+    render();
+    showMessage("Drawing details saved.");
   }
 
-  function deleteRecord(recordIdValue) {
-    const record = state.records.find((item) => item.id === recordIdValue);
-    if (!record) {
+  async function deleteActiveDrawing() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
       return;
     }
-    if (!canDeleteRecord(record)) {
-      showMessage("Only this PC can delete this record.", true);
-      return;
-    }
-
-    const ok = window.confirm(`Delete ${record.pilingPointNumber} for ${record.blockName}?`);
+    const ok = window.confirm(`Remove ${drawing.fileName} and its local records?`);
     if (!ok) {
       return;
     }
 
-    state.records = state.records.filter((item) => item.id !== recordIdValue);
-    persistRecords();
-    notifyPeers();
+    state.drawings = state.drawings.filter((item) => item.id !== drawing.id);
+    state.records = state.records.filter((record) => record.drawingId !== drawing.id);
+    state.activeDrawingId = state.drawings[0]?.id || "";
+    await deletePdfBytes(drawing.id).catch(() => {});
+    persist();
+    resetEntryForm();
     render();
-
-    if (state.editingId === recordIdValue) {
-      resetForm({ keepContext: true });
-    }
-
-    showMessage("Record deleted locally.");
+    showMessage("Drawing removed from this device.");
   }
 
-  function resetForm(options = {}) {
-    const profile = readProfile();
-    state.editingId = "";
-    els.pilingPointNumber.value = "";
-    els.length3m.value = "0";
-    els.length6m.value = "0";
-    els.length9m.value = "0";
-    els.length12m.value = "0";
-    els.reportNoInput.value = "";
-    els.pilingNoInput.value = "";
-    els.pileSize.value = "";
-    els.setMm.value = "";
-    els.tcMm.value = "";
-    els.penToBglMrt.value = "";
-    els.cutOffLevel.value = "";
-    els.payLength.value = "";
-    els.remarks.value = "";
-    els.recordDate.value = todayInputValue();
+  async function clearAllData() {
+    const ok = window.confirm("Clear all local AkZ piling status data on this device?");
+    if (!ok) {
+      return;
+    }
+    localStorage.removeItem(STORAGE_KEY);
+    state.drawings = [];
+    state.records = [];
+    state.activeDrawingId = "";
+    await clearPdfBytes().catch(() => {});
+    resetEntryForm();
+    render();
+    showMessage("Local data cleared.");
+  }
 
-    if (!options.keepContext) {
-      els.projectName.value = profile.projectName || "";
-      els.blockName.value = profile.blockName || "";
-      els.username.value = profile.username || "";
+  function addSinglePile() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload or choose a drawing first.", true);
+      return;
+    }
+    const number = cleanText(window.prompt("Pile number / point") || "");
+    if (!number) {
+      return;
+    }
+    const grid = els.rangeGrid.value || "";
+    addPilesToDrawing(drawing, [{ number, grid, source: "manual" }]);
+  }
+
+  function addPileRange() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload or choose a drawing first.", true);
+      return;
     }
 
-    els.saveButton.querySelector("span:last-child").textContent = "Save record";
-    updateMeterPreview();
-    clearMessage();
+    const start = Number.parseInt(els.rangeStart.value, 10);
+    const end = Number.parseInt(els.rangeEnd.value, 10);
+    const prefix = cleanText(els.rangePrefix.value);
+    const grid = els.rangeGrid.value || "";
+
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+      showMessage("Enter a valid pile range.", true);
+      return;
+    }
+    if (end - start > 3000) {
+      showMessage("Use a smaller range.", true);
+      return;
+    }
+
+    const piles = [];
+    for (let value = start; value <= end; value += 1) {
+      piles.push({ number: `${prefix}${value}`, grid, source: "manual" });
+    }
+    addPilesToDrawing(drawing, piles);
+  }
+
+  function addPilesToDrawing(drawing, piles) {
+    const existing = new Set(drawing.piles.map((pile) => pile.number.toLowerCase()));
+    const next = piles.map(normalizePile).filter((pile) => pile.number && !existing.has(pile.number.toLowerCase()));
+    if (!next.length) {
+      showMessage("No new pile numbers were added.", true);
+      return;
+    }
+    drawing.piles = uniquePiles([...drawing.piles, ...next]).sort(sortPiles);
+    drawing.updatedAt = Date.now();
+    persist();
+    render();
+    showMessage(`${next.length} pile number${next.length === 1 ? "" : "s"} added.`);
+  }
+
+  function saveProgressRecord(event) {
+    event.preventDefault();
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload or choose a drawing first.", true);
+      return;
+    }
+
+    const pileNumber = els.pileSelect.value;
+    const pile = drawing.piles.find((item) => item.number === pileNumber);
+    const date = els.pilingDate.value;
+    const depth = cleanText(els.penetrationDepth.value);
+
+    if (!pile) {
+      showMessage("Choose a pile number.", true);
+      return;
+    }
+    if (!date) {
+      showMessage("Choose a piling date.", true);
+      return;
+    }
+    if (!depth) {
+      showMessage("Enter penetration depth.", true);
+      return;
+    }
+
+    const grid = els.gridSelect.value || pile.grid || "";
+    if (grid && grid !== pile.grid) {
+      pile.grid = grid;
+    }
+
+    state.records.push(
+      normalizeRecord({
+        id: uniqueId("record"),
+        drawingId: drawing.id,
+        pileNumber: pile.number,
+        grid,
+        date,
+        penetrationDepth: depth,
+        remarks: cleanText(els.recordRemarks.value),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+    );
+
+    drawing.updatedAt = Date.now();
+    persist();
+    els.penetrationDepth.value = "";
+    els.recordRemarks.value = "";
+    render();
+    showMessage(`Progress saved for ${pile.number}.`);
+  }
+
+  function resetEntryForm() {
+    els.gridSelect.value = "";
+    renderPileSelect();
+    els.pilingDate.value = todayInputValue();
+    els.penetrationDepth.value = "";
+    els.recordRemarks.value = "";
+    renderHistory();
+  }
+
+  function handleStatusClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) {
+      return;
+    }
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      return;
+    }
+
+    const pileNumber = button.dataset.pile;
+    const pile = drawing.piles.find((item) => item.number === pileNumber);
+    if (!pile) {
+      return;
+    }
+
+    if (button.dataset.action === "select") {
+      els.gridSelect.value = pile.grid || "";
+      renderPileSelect();
+      els.pileSelect.value = pile.number;
+      renderHistory();
+      window.scrollTo({ top: document.querySelector(".entry-panel").offsetTop - 12, behavior: "smooth" });
+    }
+
+    if (button.dataset.action === "remove") {
+      const hasRecords = state.records.some((record) => record.drawingId === drawing.id && record.pileNumber === pile.number);
+      const ok = window.confirm(hasRecords ? `Remove ${pile.number} and its history?` : `Remove ${pile.number}?`);
+      if (!ok) {
+        return;
+      }
+      drawing.piles = drawing.piles.filter((item) => item.number !== pile.number);
+      state.records = state.records.filter((record) => !(record.drawingId === drawing.id && record.pileNumber === pile.number));
+      persist();
+      render();
+      showMessage(`${pile.number} removed.`);
+    }
+
+    if (button.dataset.action === "delete-record") {
+      const record = state.records.find((item) => item.id === button.dataset.recordId);
+      if (!record) {
+        return;
+      }
+      const ok = window.confirm(`Delete ${record.pileNumber} record for ${record.date}?`);
+      if (!ok) {
+        return;
+      }
+      state.records = state.records.filter((item) => item.id !== record.id);
+      persist();
+      render();
+      showMessage("Record deleted.");
+    }
+  }
+
+  function handleStatusChange(event) {
+    const select = event.target.closest("select[data-action='grid']");
+    if (!select) {
+      return;
+    }
+    const drawing = getActiveDrawing();
+    const pile = drawing?.piles.find((item) => item.number === select.dataset.pile);
+    if (!pile) {
+      return;
+    }
+    pile.grid = select.value;
+    drawing.updatedAt = Date.now();
+    persist();
+    renderGridSelects();
+    renderPileSelect();
+    renderStats();
   }
 
   function render() {
-    const filteredRecords = getFilteredRecords();
-    renderProjectFilter();
-    renderReportFilters();
-    renderRecords(filteredRecords);
+    ensureActiveDrawing();
+    renderDrawingSelect();
+    renderDrawingFields();
+    renderGridSelects();
+    renderPileSelect();
+    renderStats();
+    renderStatusTable();
+    renderHistory();
+    updateControlStates();
   }
 
-  function renderProjectFilter() {
-    const currentValue = els.projectFilter.value;
-    const projects = Array.from(new Set(state.records.map((record) => record.projectName))).sort();
-    els.projectFilter.innerHTML = `<option value="">All projects</option>${projects
-      .map((project) => `<option value="${escapeAttr(project)}">${escapeHtml(project)}</option>`)
-      .join("")}`;
-    if (projects.includes(currentValue)) {
-      els.projectFilter.value = currentValue;
+  function ensureActiveDrawing() {
+    if (state.activeDrawingId && state.drawings.some((drawing) => drawing.id === state.activeDrawingId)) {
+      return;
     }
+    state.activeDrawingId = state.drawings[0]?.id || "";
   }
 
-  function renderReportFilters() {
-    const currentDate = els.reportDate.value;
-    const currentSite = els.reportSite.value;
-    const dates = Array.from(new Set(state.records.map((record) => record.date))).sort((a, b) =>
-      dateKey(b).localeCompare(dateKey(a))
+  function renderDrawingSelect() {
+    const options = state.drawings.map(
+      (drawing) => `<option value="${escapeAttr(drawing.id)}">${escapeHtml(drawing.fileName)}</option>`
     );
-    const sites = Array.from(new Set(state.records.map((record) => record.projectName))).sort();
+    els.drawingSelect.innerHTML = options.length ? options.join("") : `<option value="">No PDF uploaded</option>`;
+    els.drawingSelect.value = state.activeDrawingId;
+  }
 
-    els.reportDate.innerHTML = dates.length
-      ? dates.map((date) => `<option value="${escapeAttr(date)}">${escapeHtml(date)}</option>`).join("")
-      : `<option value="">No dates</option>`;
-    els.reportSite.innerHTML = `<option value="">All sites</option>${sites
-      .map((site) => `<option value="${escapeAttr(site)}">${escapeHtml(site)}</option>`)
-      .join("")}`;
+  function renderDrawingFields() {
+    const drawing = getActiveDrawing();
+    els.projectTitle.value = drawing?.projectTitle || "";
+    els.drawingTitle.value = drawing?.drawingTitle || "";
+    els.gridLetters.value = drawing?.gridLetters.join(", ") || "";
+    els.gridNumbers.value = drawing?.gridNumbers.join(", ") || "";
+  }
 
-    if (dates.includes(currentDate)) {
-      els.reportDate.value = currentDate;
+  function renderGridSelects() {
+    const drawing = getActiveDrawing();
+    const gridOptions = drawing ? getGridOptions(drawing) : [];
+    const entryCurrent = els.gridSelect.value;
+    const rangeCurrent = els.rangeGrid.value;
+    const gridHtml = gridOptions.map((grid) => `<option value="${escapeAttr(grid)}">${escapeHtml(grid)}</option>`).join("");
+
+    els.gridSelect.innerHTML = `<option value="">All grids</option>${gridHtml}`;
+    els.rangeGrid.innerHTML = `<option value="">Unassigned</option>${gridHtml}`;
+
+    if (gridOptions.includes(entryCurrent) || entryCurrent === "") {
+      els.gridSelect.value = entryCurrent;
     }
-    if (sites.includes(currentSite)) {
-      els.reportSite.value = currentSite;
+    if (gridOptions.includes(rangeCurrent) || rangeCurrent === "") {
+      els.rangeGrid.value = rangeCurrent;
     }
   }
 
-  function renderRecords(records) {
-    els.emptyState.classList.toggle("show", records.length === 0);
-
-    els.recordList.innerHTML = groupRecordsByDate(records)
-      .map(
-        (group) => `
-          <section class="date-group" aria-label="${escapeAttr(group.date)}">
-            <h3 class="date-heading">${escapeHtml(group.date)}</h3>
-            <ul class="record-items">
-              ${group.records.map(renderRecordRow).join("")}
-            </ul>
-          </section>
-        `
-      )
-      .join("");
-
-    els.recordList.querySelectorAll("button[data-action]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (button.dataset.action === "edit") {
-          editRecord(button.dataset.id);
-        } else {
-          deleteRecord(button.dataset.id);
-        }
-      });
-    });
+  function renderPileSelect() {
+    const drawing = getActiveDrawing();
+    const current = els.pileSelect.value;
+    const grid = els.gridSelect.value;
+    const piles = drawing ? drawing.piles.filter((pile) => !grid || pile.grid === grid).sort(sortPiles) : [];
+    els.pileSelect.innerHTML = piles.length
+      ? piles.map((pile) => `<option value="${escapeAttr(pile.number)}">${escapeHtml(pile.number)}</option>`).join("")
+      : `<option value="">No piles</option>`;
+    if (piles.some((pile) => pile.number === current)) {
+      els.pileSelect.value = current;
+    }
   }
 
-  function renderRecordRow(record) {
-    const editButton = canDeleteRecord(record)
-      ? `<button class="secondary-button" type="button" data-action="edit" data-id="${escapeAttr(record.id)}">Edit</button>`
-      : "";
-    const deleteButton = canDeleteRecord(record)
-      ? `<button class="danger-button" type="button" data-action="delete" data-id="${escapeAttr(record.id)}">Delete</button>`
-      : "";
-    const lengthHtml = lengthParts(record)
-      .map((part) => `<span class="length-chip">${escapeHtml(part)}</span>`)
+  function renderStats() {
+    const drawing = getActiveDrawing();
+    const total = drawing?.piles.length || 0;
+    const recorded = drawing ? drawing.piles.filter((pile) => getLatestRecord(drawing.id, pile.number)).length : 0;
+    const pending = Math.max(total - recorded, 0);
+    const percent = total ? Math.round((recorded / total) * 100) : 0;
+
+    els.totalPiles.textContent = String(total);
+    els.recordedPiles.textContent = String(recorded);
+    els.pendingPiles.textContent = String(pending);
+    els.progressPercent.textContent = `${percent}%`;
+  }
+
+  function renderStatusTable() {
+    const drawing = getActiveDrawing();
+    const search = cleanText(els.pileSearch.value).toLowerCase();
+    const gridOptions = drawing ? getGridOptions(drawing) : [];
+    const piles = drawing
+      ? drawing.piles
+          .filter((pile) => {
+            const latest = getLatestRecord(drawing.id, pile.number);
+            const haystack = [pile.number, pile.grid, latest?.date, latest?.penetrationDepth, latest?.remarks].join(" ").toLowerCase();
+            return !search || haystack.includes(search);
+          })
+          .sort(sortPiles)
+      : [];
+
+    els.emptyState.classList.toggle("show", !drawing || !piles.length);
+    els.emptyState.querySelector("p").textContent = drawing ? "No piles match the current search." : "No drawing loaded.";
+    els.statusBody.innerHTML = piles.map((pile) => renderPileRow(drawing, pile, gridOptions)).join("");
+  }
+
+  function renderPileRow(drawing, pile, gridOptions) {
+    const latest = getLatestRecord(drawing.id, pile.number);
+    const gridHtml = [`<option value="">Unassigned</option>`]
+      .concat(gridOptions.map((grid) => `<option value="${escapeAttr(grid)}">${escapeHtml(grid)}</option>`))
       .join("");
-    const optionalHtml = optionalRecordFields(record)
-      .map((field) => `<span class="detail-chip">${escapeHtml(field.label)}: ${escapeHtml(field.value)}</span>`)
-      .join("");
-    const measureHtml = [
-      record.totalPieces > 0 ? `<span class="welding-chip">${record.totalWelding} welding</span>` : "",
-      record.totalPieces > 0 ? `<span class="meter-chip">${record.totalMeters}m length</span>` : ""
-    ].join("");
+    const statusClass = latest ? "status-done" : "status-open";
 
     return `
-      <li class="record-row">
-        <div class="record-title">
-          <h4><span class="point-chip">${escapeHtml(record.pilingPointNumber)}</span></h4>
-          <div class="record-subtitle">${escapeHtml(record.projectName)} / ${escapeHtml(record.blockName)} / ${escapeHtml(record.username)}</div>
-        </div>
-        <div class="record-facts" aria-label="Record details">
-          <div class="record-lengths">${lengthHtml}</div>
-          <div class="record-measures">${measureHtml}</div>
-          ${optionalHtml ? `<div class="record-details">${optionalHtml}</div>` : ""}
-        </div>
-        <div class="record-actions">
-          ${editButton}
-          ${deleteButton}
-        </div>
-      </li>
-    `;
+      <tr>
+        <td><strong>${escapeHtml(pile.number)}</strong></td>
+        <td>
+          <select class="inline-select" data-action="grid" data-pile="${escapeAttr(pile.number)}">
+            ${gridHtml}
+          </select>
+        </td>
+        <td>${escapeHtml(latest?.date || "-")}</td>
+        <td>${escapeHtml(latest?.penetrationDepth || "-")}</td>
+        <td><span class="${statusClass}">${latest ? "Recorded" : "Pending"}</span></td>
+        <td class="row-actions">
+          <button class="secondary-button mini-button" type="button" data-action="select" data-pile="${escapeAttr(pile.number)}">Select</button>
+          <button class="danger-button mini-button" type="button" data-action="remove" data-pile="${escapeAttr(pile.number)}">Remove</button>
+        </td>
+      </tr>
+    `.replace('value="' + escapeAttr(pile.grid || "") + '"', 'value="' + escapeAttr(pile.grid || "") + '" selected');
   }
 
-  function optionalRecordFields(record) {
-    return [
-      ["Report No", record.reportNo],
-      ["Piling No", record.pilingNo],
-      ["Pile Size", record.pileSize],
-      ["Set", record.setMm],
-      ["T.C.", record.tcMm],
-      ["Pen to BGL", record.penToBglMrt],
-      ["Cut Off", record.cutOffLevel],
-      ["Pay Length", record.payLength],
-      ["Remarks", record.remarks]
-    ]
-      .filter(([, value]) => cleanText(value))
-      .map(([label, value]) => ({ label, value: cleanText(value) }));
+  function renderHistory() {
+    const drawing = getActiveDrawing();
+    const pileNumber = els.pileSelect.value;
+    const records = drawing && pileNumber ? getPileRecords(drawing.id, pileNumber) : [];
+    els.pileHistory.innerHTML = records.length
+      ? records
+          .map(
+            (record) => `
+              <div class="history-row">
+                <div>
+                  <strong>${escapeHtml(record.date)}</strong>
+                  <span>${escapeHtml(record.penetrationDepth)}</span>
+                  ${record.remarks ? `<p>${escapeHtml(record.remarks)}</p>` : ""}
+                </div>
+                <button class="danger-button mini-button" type="button" data-action="delete-record" data-record-id="${escapeAttr(record.id)}" data-pile="${escapeAttr(record.pileNumber)}">Delete</button>
+              </div>
+            `
+          )
+          .join("")
+      : `<p class="muted-text">No history for this pile.</p>`;
   }
 
-  function groupRecordsByDate(records) {
-    return records.reduce((groups, record) => {
-      const currentGroup = groups[groups.length - 1];
-      if (currentGroup && currentGroup.date === record.date) {
-        currentGroup.records.push(record);
-        return groups;
-      }
-
-      groups.push({ date: record.date, records: [record] });
-      return groups;
-    }, []);
-  }
-
-  function lengthParts(record) {
-    return [
-      [3, record.length3m],
-      [6, record.length6m],
-      [9, record.length9m],
-      [12, record.length12m]
-    ]
-      .filter(([, count]) => count > 0)
-      .map(([length, count]) => `${length}m - ${count} nos`);
-  }
-
-  function recordLengthText(record) {
-    const parts = lengthParts(record);
-    return parts.length ? parts.join(", ") : "";
-  }
-
-  function getFilteredRecords() {
-    const search = cleanText(els.searchInput.value).toLowerCase();
-    const project = els.projectFilter.value;
-
-    return state.records
-      .filter((record) => {
-        if (project && record.projectName !== project) {
-          return false;
-        }
-
-        if (!search) {
-          return true;
-        }
-
-        const haystack = [
-          record.projectName,
-          record.blockName,
-          record.username,
-          record.pilingPointNumber,
-          record.date,
-          record.reportNo,
-          record.pilingNo,
-          record.pileSize,
-          record.setMm,
-          record.tcMm,
-          record.penToBglMrt,
-          record.cutOffLevel,
-          record.payLength,
-          record.remarks
-        ]
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(search);
-      })
-      .sort(sortRecords);
+  function updateControlStates() {
+    const hasDrawing = Boolean(getActiveDrawing());
+    [
+      els.drawingSelect,
+      els.deleteDrawingButton,
+      els.projectTitle,
+      els.drawingTitle,
+      els.gridLetters,
+      els.gridNumbers,
+      els.saveDrawingButton,
+      els.exportCsvButton,
+      els.exportPdfButton,
+      els.gridSelect,
+      els.pileSelect,
+      els.pilingDate,
+      els.penetrationDepth,
+      els.recordRemarks,
+      els.resetEntryButton,
+      els.pileSearch,
+      els.addPileButton,
+      els.rangeStart,
+      els.rangeEnd,
+      els.rangePrefix,
+      els.rangeGrid,
+      els.addRangeButton
+    ].forEach((element) => {
+      element.disabled = !hasDrawing;
+    });
   }
 
   function exportCsv() {
-    const records = getFilteredRecords();
-    if (!records.length) {
-      showMessage("No records to export.", true);
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload or choose a drawing first.", true);
       return;
     }
 
-    const headers = [
-      "Project Name",
-      "Block Name",
-      "Supervisor",
-      "Piling Point Numbers",
-      "Date",
-      "3m",
-      "6m",
-      "9m",
-      "12m",
-      "Report No",
-      "Piling No",
-      "Pile Size",
-      "Set (mm)",
-      "T.C. (mm)",
-      "Pen to BGL (MRT)",
-      "Cut Off Level",
-      "Pay Length",
-      "Remarks",
-      "Total Pieces",
-      "Total Meters",
-      "No. of Welding"
-    ];
+    const rows = drawing.piles.map((pile) => {
+      const latest = getLatestRecord(drawing.id, pile.number);
+      return [
+        drawing.projectTitle,
+        drawing.drawingTitle,
+        drawing.fileName,
+        pile.number,
+        pile.grid || "",
+        latest?.date || "",
+        latest?.penetrationDepth || "",
+        latest?.remarks || "",
+        getPileRecords(drawing.id, pile.number).length,
+        latest ? "Recorded" : "Pending"
+      ];
+    });
+    const csv = [
+      ["Project Title", "Drawing Title", "PDF File", "Pile Number", "Grid", "Latest Piling Date", "Latest Penetration Depth", "Latest Remarks", "History Count", "Status"],
+      ...rows
+    ]
+      .map((row) => row.map(csvCell).join(","))
+      .join("\n");
 
-    const rows = records.map((record) => [
-      record.projectName,
-      record.blockName,
-      record.username,
-      record.pilingPointNumber,
-      record.date,
-      record.length3m,
-      record.length6m,
-      record.length9m,
-      record.length12m,
-      record.reportNo || "",
-      record.pilingNo || "",
-      record.pileSize || "",
-      record.setMm || "",
-      record.tcMm || "",
-      record.penToBglMrt || "",
-      record.cutOffLevel || "",
-      record.payLength || "",
-      record.remarks || "",
-      record.totalPieces,
-      record.totalMeters,
-      record.totalWelding
-    ]);
-
-    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `pile-piling-records-${dateKey(todayValue())}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-status.csv`);
     showMessage("CSV exported.");
   }
 
-  function exportDailyReport() {
-    const date = els.reportDate.value;
-    const site = els.reportSite.value;
-    const format = els.reportFormat.value;
-
-    if (!date) {
-      showMessage("Choose a report date.", true);
+  async function exportEmbeddedPdf() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload or choose a drawing first.", true);
       return;
     }
 
-    const records = state.records
-      .filter((record) => record.date === date && (!site || record.projectName === site))
-      .sort((a, b) => {
-        if (a.projectName !== b.projectName) {
-          return a.projectName.localeCompare(b.projectName);
-        }
-        if (a.blockName !== b.blockName) {
-          return a.blockName.localeCompare(b.blockName);
-        }
-        return a.pilingPointNumber.localeCompare(b.pilingPointNumber, undefined, { numeric: true });
-      });
-
-    if (!records.length) {
-      showMessage("No daily records for this selection.", true);
-      return;
-    }
-
-    const html = buildDailyReportHtml(date, site, records);
-    if (format === "word") {
-      downloadWordReport(html, date, site);
-      showMessage("Word report exported.");
-      return;
-    }
-
-    openPdfReport(html);
-  }
-
-  function buildDailyReportHtml(date, site, records) {
-    const pages = groupRecordsBySite(records).flatMap((group) => {
-      const chunks = chunkRecords(group.records, 26);
-      return chunks.map((chunk, index) => ({
-        site: group.site,
-        records: chunk,
-        pageNo: index + 1,
-        pageTotal: chunks.length
-      }));
-    });
-
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Daily Piling Summary</title>
-    <style>${reportCss()}</style>
-  </head>
-  <body>
-    ${pages.map(renderDailySummaryPage).join("")}
-  </body>
-</html>`;
-  }
-
-  function renderDailySummaryPage(page) {
-    const reportNo = firstFilled(page.records, "reportNo");
-    const pilingNo = firstFilled(page.records, "pilingNo");
-    const rows = Array.from({ length: 26 }, (_, index) => renderDailySummaryRow(page.records[index], index));
-
-    return `
-    <section class="daily-summary-page">
-      <table class="form-header">
-        <tr>
-          <td class="title-cell">
-            <div>ANGKAZEN ENGINEERING SDN. BHD.</div>
-            <div>DAILY PILING SUMMARY</div>
-          </td>
-          <td class="doc-cell">
-            <div>AZE-OP :</div>
-            <div>Revision : 0</div>
-            <div>Section : OP-IS-P01</div>
-            <div>Page&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: ${escapeHtml(`${page.pageNo} of ${page.pageTotal}`)}</div>
-          </td>
-        </tr>
-      </table>
-
-      <table class="info-row">
-        <tr>
-          <td class="info-label">SITE :</td>
-          <td class="info-line">${escapeHtml(page.site)}</td>
-          <td class="info-label report-label">REPORT NO :</td>
-          <td class="info-line short-line">${escapeHtml(reportNo)}</td>
-          <td class="info-label piling-label">PILING NO :</td>
-          <td class="info-line">${escapeHtml(pilingNo)}</td>
-        </tr>
-      </table>
-
-      <table class="summary-grid">
-        <colgroup>
-          <col class="col-no">
-          <col class="col-date">
-          <col class="col-ref">
-          <col class="col-pile-size">
-          <col class="col-length">
-          <col class="col-set">
-          <col class="col-tc">
-          <col class="col-pen">
-          <col class="col-joint">
-          <col class="col-cut">
-          <col class="col-pay">
-          <col class="col-remarks">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>NO</th>
-            <th>DATE</th>
-            <th>REF NO</th>
-            <th>PILE<br>SIZE</th>
-            <th>PILE LENGTH USED</th>
-            <th>SET<br>MM</th>
-            <th>T.C.<br>MM</th>
-            <th>PEN<br>TO BGL<br>(MRT)</th>
-            <th>JOINT</th>
-            <th>CUT<br>OFF<br>LEVEL</th>
-            <th>PAY<br>LENGTH</th>
-            <th>REMARKS</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.join("")}
-        </tbody>
-      </table>
-
-      <div class="remarks-line"><span>REMARKS :</span><i></i></div>
-
-      <table class="signature-grid">
-        <tr>
-          <td>
-            <div class="rep-label">ANGKAZEN REPRESENTATIVE :</div>
-            <div class="left-signature-row"><span>SIGNATURE :</span><i></i></div>
-            <div class="left-signature-row"><span>NAME&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</span><i></i></div>
-          </td>
-          <td>
-            <div class="rep-label">CLIENT'S REPRESENTATIVE :</div>
-            <div class="right-signature-row"><span>SIGNATURE :</span><i></i></div>
-          </td>
-        </tr>
-      </table>
-    </section>`;
-  }
-
-  function renderDailySummaryRow(record, index) {
-    if (!record) {
-      return `
-          <tr>
-            <td>${index + 1}</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-          </tr>`;
-    }
-
-    return `
-          <tr>
-            <td>${index + 1}</td>
-            <td>${escapeHtml(record.date)}</td>
-            <td>${escapeHtml(record.pilingPointNumber)}</td>
-            <td>${escapeHtml(record.pileSize || "")}</td>
-            <td>${escapeHtml(pileLengthUsedText(record))}</td>
-            <td>${escapeHtml(record.setMm || "")}</td>
-            <td>${escapeHtml(record.tcMm || "")}</td>
-            <td>${escapeHtml(record.penToBglMrt || "")}</td>
-            <td>${record.totalPieces > 0 ? escapeHtml(record.totalWelding) : ""}</td>
-            <td>${escapeHtml(record.cutOffLevel || "")}</td>
-            <td>${escapeHtml(record.payLength || "")}</td>
-            <td>${escapeHtml(record.remarks || "")}</td>
-          </tr>`;
-  }
-
-  function pileLengthUsedText(record) {
-    return [
-      [3, record.length3m],
-      [6, record.length6m],
-      [9, record.length9m],
-      [12, record.length12m]
-    ]
-      .flatMap(([length, count]) => Array.from({ length: intValue(count) }, () => String(length)))
-      .join("+");
-  }
-
-  function firstFilled(records, key) {
-    const record = records.find((item) => cleanText(item[key]));
-    return record ? cleanText(record[key]) : "";
-  }
-
-  function chunkRecords(records, size) {
-    const chunks = [];
-    for (let index = 0; index < records.length; index += size) {
-      chunks.push(records.slice(index, index + size));
-    }
-    return chunks.length ? chunks : [[]];
-  }
-
-  function groupRecordsBySite(records) {
-    const groups = [];
-    records.forEach((record) => {
-      const current = groups.find((group) => group.site === record.projectName);
-      if (current) {
-        current.records.push(record);
-      } else {
-        groups.push({ site: record.projectName, records: [record] });
-      }
-    });
-    return groups;
-  }
-
-  function openPdfReport(html) {
-    const reportWindow = window.open("", "_blank");
-    if (!reportWindow) {
-      showMessage("Allow pop-ups to create the PDF report.", true);
-      return;
-    }
-
-    reportWindow.document.open();
-    reportWindow.document.write(html);
-    reportWindow.document.close();
-    reportWindow.focus();
-    window.setTimeout(() => reportWindow.print(), 350);
-    showMessage("PDF report opened. Choose Save as PDF.");
-  }
-
-  function downloadWordReport(html, date, site) {
-    const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `pile-daily-report-${dateKey(date)}-${filenamePart(site || "all-sites")}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function reportCss() {
-    return `
-      @page {
-        size: A4 portrait;
-        margin: 16mm 13mm 10mm;
-      }
-      body {
-        color: #111;
-        font-family: "Times New Roman", Times, serif;
-        margin: 0;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-      }
-      .daily-summary-page {
-        break-after: page;
-        page-break-after: always;
-      }
-      .daily-summary-page:last-child {
-        break-after: auto;
-        page-break-after: auto;
-      }
-      .form-header td,
-      .info-row td,
-      .summary-grid th,
-      .summary-grid td,
-      .signature-grid td {
-        border: 1px solid #111;
-      }
-      .form-header {
-        height: 22mm;
-      }
-      .title-cell {
-        width: 78.4%;
-        text-align: center;
-        vertical-align: middle;
-        font-size: 15px;
-        font-weight: 700;
-        line-height: 1.45;
-      }
-      .doc-cell {
-        width: 21.6%;
-        padding: 2mm 2.2mm;
-        font-size: 8px;
-        line-height: 1.45;
-        vertical-align: middle;
-      }
-      .info-row td {
-        height: 10mm;
-        border-top: 0;
-        font-size: 10px;
-        font-weight: 700;
-        vertical-align: middle;
-      }
-      .info-label {
-        width: 14mm;
-        border-right: 0 !important;
-        padding-left: 0.7mm;
-        white-space: nowrap;
-      }
-      .report-label {
-        width: 27mm;
-      }
-      .piling-label {
-        width: 25mm;
-      }
-      .info-line {
-        border-left: 0 !important;
-        padding: 0 2mm;
-        text-decoration: underline;
-        text-underline-offset: 3px;
-      }
-      .short-line {
-        width: 22mm;
-      }
-      .summary-grid th {
-        height: 10.8mm;
-        padding: 0.7mm;
-        font-size: 7.1px;
-        line-height: 1;
-        text-align: center;
-        vertical-align: middle;
-      }
-      .summary-grid td {
-        height: 6.35mm;
-        padding: 0.6mm 0.8mm;
-        font-size: 8px;
-        line-height: 1.05;
-        text-align: center;
-        vertical-align: middle;
-      }
-      .summary-grid td:nth-child(5),
-      .summary-grid td:nth-child(12) {
-        text-align: left;
-      }
-      .col-no { width: 8.4mm; }
-      .col-date { width: 15.4mm; }
-      .col-ref { width: 16mm; }
-      .col-pile-size { width: 14.8mm; }
-      .col-length { width: 37.5mm; }
-      .col-set { width: 10.2mm; }
-      .col-tc { width: 10.2mm; }
-      .col-pen { width: 11.3mm; }
-      .col-joint { width: 9.6mm; }
-      .col-cut { width: 10.4mm; }
-      .col-pay { width: 11.1mm; }
-      .col-remarks { width: 28.1mm; }
-      .remarks-line {
-        display: flex;
-        align-items: flex-end;
-        gap: 4mm;
-        height: 16mm;
-        font-size: 10px;
-        font-weight: 700;
-      }
-      .remarks-line i,
-      .left-signature-row i,
-      .right-signature-row i {
-        display: block;
-        flex: 1 1 auto;
-        border-bottom: 1px solid #111;
-      }
-      .signature-grid {
-        height: 36mm;
-      }
-      .signature-grid td {
-        width: 50%;
-        padding: 4mm 2mm 2mm;
-        vertical-align: top;
-      }
-      .rep-label {
-        font-size: 10px;
-        font-weight: 700;
-      }
-      .left-signature-row,
-      .right-signature-row {
-        display: flex;
-        align-items: flex-end;
-        gap: 4mm;
-        font-size: 10px;
-        font-weight: 700;
-      }
-      .left-signature-row {
-        margin-top: 12mm;
-      }
-      .left-signature-row + .left-signature-row {
-        margin-top: 3.2mm;
-      }
-      .right-signature-row {
-        margin-top: 19mm;
-      }
-    `;
-  }
-
-  function loadRecords() {
+    showMessage("Preparing PDF output...");
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const legacy = stored ? "" : localStorage.getItem(LEGACY_STORAGE_KEY);
-      const parsed = JSON.parse(stored || legacy || "[]");
-      const records = Array.isArray(parsed)
-        ? parsed.map((record) => normalizeLocalRecord(record, { assignCurrentDevice: true })).filter(Boolean)
-        : [];
-      if (!stored && legacy) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-      }
-      return records;
-    } catch (error) {
-      return [];
-    }
-  }
-
-  function persistRecords() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.records));
-  }
-
-  function readProfile() {
-    try {
-      const stored = localStorage.getItem(PROFILE_KEY);
-      const legacy = stored ? "" : localStorage.getItem(LEGACY_PROFILE_KEY);
-      const profile = JSON.parse(stored || legacy || "{}") || {};
-      if (!stored && legacy) {
-        localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-      }
-      return profile;
-    } catch (error) {
-      return {};
-    }
-  }
-
-  function hydrateProfile() {
-    const profile = readProfile();
-    els.projectName.value = profile.projectName || "";
-    els.blockName.value = profile.blockName || "";
-    els.username.value = profile.username || "";
-  }
-
-  function persistProfile() {
-    localStorage.setItem(
-      PROFILE_KEY,
-      JSON.stringify({
-        projectName: cleanText(els.projectName.value),
-        blockName: cleanText(els.blockName.value),
-        username: cleanText(els.username.value)
-      })
-    );
-  }
-
-  function setupBroadcastChannel() {
-    if (!("BroadcastChannel" in window)) {
-      return;
-    }
-
-    state.channel = new BroadcastChannel("pile-records");
-    state.channel.addEventListener("message", (event) => {
-      if (!event.data || event.data.type !== "records-updated") {
+      const originalBytes = await readPdfBytes(drawing.id);
+      if (!originalBytes) {
+        showMessage("Original PDF is not stored on this device. Re-upload it before exporting.", true);
         return;
       }
-      state.records = loadRecords();
-      render();
+
+      const PDFLib = await ensurePdfLib();
+      const pdfDoc = await PDFLib.PDFDocument.load(originalBytes, { ignoreEncryption: true });
+      const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+      const bold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+      const pages = pdfDoc.getPages();
+      const summaryRows = buildSummaryRows(drawing);
+      const recorded = summaryRows.filter((row) => row.status === "Recorded").length;
+
+      pdfDoc.setTitle(`${drawing.drawingTitle || drawing.fileName} - AkZ Piling Status`);
+      pdfDoc.setSubject(`AkZ Piling Status Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
+      pdfDoc.setKeywords(["AkZ Piling Status", `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
+      stampOriginalPdfPage(PDFLib, pages[0], font, drawing, recorded, summaryRows.length);
+      appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
+
+      const outputBytes = await pdfDoc.save({ useObjectStreams: false });
+      downloadBlob(new Blob([outputBytes], { type: "application/pdf" }), `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-status.pdf`);
+      showMessage("PDF output exported.");
+    } catch (error) {
+      showMessage("PDF output failed. Check the PDF and try again.", true);
+    }
+  }
+
+  function buildSummaryRows(drawing) {
+    return drawing.piles.sort(sortPiles).map((pile) => {
+      const latest = getLatestRecord(drawing.id, pile.number);
+      return {
+        pile: pile.number,
+        grid: pile.grid || "",
+        date: latest?.date || "",
+        depth: latest?.penetrationDepth || "",
+        remarks: latest?.remarks || "",
+        status: latest ? "Recorded" : "Pending"
+      };
     });
   }
 
-  function notifyPeers() {
-    if (state.channel) {
-      state.channel.postMessage({ type: "records-updated" });
+  function stampOriginalPdfPage(PDFLib, page, font, drawing, recorded, total) {
+    if (!page) {
+      return;
     }
+    const { width } = page.getSize();
+    const text = `AkZ Piling Status Ver${APP_VERSION} | ${recorded}/${total} piles recorded | ${formatDateForDisplay(new Date())}`;
+    page.drawRectangle({
+      x: 24,
+      y: 20,
+      width: Math.min(width - 48, 520),
+      height: 20,
+      color: PDFLib.rgb(1, 1, 1),
+      opacity: 0.82
+    });
+    page.drawText(text, {
+      x: 30,
+      y: 26,
+      size: 8,
+      font,
+      color: PDFLib.rgb(0.08, 0.3, 0.38)
+    });
+    page.drawText(truncatePdfText(drawing.drawingTitle || drawing.fileName, 88), {
+      x: 30,
+      y: 11,
+      size: 6,
+      font,
+      color: PDFLib.rgb(0.26, 0.32, 0.35)
+    });
   }
 
-  function updateMeterPreview() {
-    const totalPieces =
-      intValue(els.length3m.value) +
-      intValue(els.length6m.value) +
-      intValue(els.length9m.value) +
-      intValue(els.length12m.value);
-    const totalMeters =
-      intValue(els.length3m.value) * 3 +
-      intValue(els.length6m.value) * 6 +
-      intValue(els.length9m.value) * 9 +
-      intValue(els.length12m.value) * 12;
-    els.meterPreview.textContent = `${totalMeters} m`;
-    els.weldingPreview.textContent = `${weldingCount(totalPieces)} welding`;
+  function appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, rows) {
+    const pageSize = [842, 595];
+    const margin = 32;
+    const rowHeight = 16;
+    const rowsPerPage = 24;
+    const chunks = chunk(rows, rowsPerPage);
+
+    chunks.forEach((pageRows, pageIndex) => {
+      const page = pdfDoc.addPage(pageSize);
+      const { width, height } = page.getSize();
+      let y = height - margin;
+
+      page.drawText("AkZ Piling Status Summary", { x: margin, y, size: 16, font: bold, color: PDFLib.rgb(0.08, 0.3, 0.38) });
+      page.drawText(`Ver${APP_VERSION}`, { x: width - margin - 48, y: y + 2, size: 9, font, color: PDFLib.rgb(0.28, 0.35, 0.38) });
+      y -= 22;
+      page.drawText(`Project: ${truncatePdfText(drawing.projectTitle || "-", 128)}`, { x: margin, y, size: 9, font, color: PDFLib.rgb(0.1, 0.12, 0.13) });
+      y -= 14;
+      page.drawText(`Drawing: ${truncatePdfText(drawing.drawingTitle || drawing.fileName, 128)}`, { x: margin, y, size: 9, font, color: PDFLib.rgb(0.1, 0.12, 0.13) });
+      y -= 14;
+      page.drawText(`Source PDF: ${truncatePdfText(drawing.fileName, 128)}`, { x: margin, y, size: 8, font, color: PDFLib.rgb(0.28, 0.35, 0.38) });
+      y -= 24;
+
+      drawTableHeader(PDFLib, page, bold, margin, y);
+      y -= rowHeight;
+
+      pageRows.forEach((row) => {
+        drawTableRow(PDFLib, page, font, margin, y, row);
+        y -= rowHeight;
+      });
+
+      page.drawText(`Page ${pageIndex + 1} of ${chunks.length} | Exported ${formatDateForDisplay(new Date())}`, {
+        x: margin,
+        y: 20,
+        size: 7,
+        font,
+        color: PDFLib.rgb(0.28, 0.35, 0.38)
+      });
+    });
   }
 
-  function setSyncStatus(stateName, label) {
-    els.syncStatus.dataset.state = stateName;
-    els.syncStatus.querySelector("span:last-child").textContent = label;
+  function drawTableHeader(PDFLib, page, font, x, y) {
+    page.drawRectangle({ x, y: y - 4, width: 778, height: 18, color: PDFLib.rgb(0.9, 0.96, 0.97) });
+    [
+      ["Pile", 0],
+      ["Grid", 76],
+      ["Date", 152],
+      ["Depth", 230],
+      ["Status", 320],
+      ["Remarks", 410]
+    ].forEach(([label, offset]) => {
+      page.drawText(label, { x: x + offset, y, size: 8, font, color: PDFLib.rgb(0.08, 0.3, 0.38) });
+    });
   }
 
-  function showMessage(message, isError) {
-    els.formMessage.textContent = message;
-    els.formMessage.classList.toggle("error", Boolean(isError));
+  function drawTableRow(PDFLib, page, font, x, y, row) {
+    page.drawLine({
+      start: { x, y: y - 5 },
+      end: { x: x + 778, y: y - 5 },
+      thickness: 0.35,
+      color: PDFLib.rgb(0.8, 0.86, 0.86)
+    });
+    [
+      [row.pile, 0, 14],
+      [row.grid || "-", 76, 14],
+      [row.date || "-", 152, 14],
+      [row.depth || "-", 230, 18],
+      [row.status, 320, 18],
+      [row.remarks || "", 410, 76]
+    ].forEach(([value, offset, max]) => {
+      page.drawText(truncatePdfText(value, max), { x: x + offset, y, size: 7, font, color: PDFLib.rgb(0.1, 0.12, 0.13) });
+    });
   }
 
-  function clearMessage() {
-    showMessage("", false);
+  function getActiveDrawing() {
+    return state.drawings.find((drawing) => drawing.id === state.activeDrawingId) || null;
   }
 
-  function normalizeLocalRecord(record, options = {}) {
-    if (!record || !record.id) {
+  function getGridOptions(drawing) {
+    const cross = [];
+    drawing.gridLetters.forEach((letter) => {
+      drawing.gridNumbers.forEach((number) => cross.push(`${letter}/${number}`));
+    });
+    const assigned = drawing.piles.map((pile) => pile.grid).filter(Boolean);
+    return uniqueStrings([...cross, ...assigned]).sort(sortGrid);
+  }
+
+  function getPileRecords(drawingId, pileNumber) {
+    return state.records
+      .filter((record) => record.drawingId === drawingId && record.pileNumber === pileNumber)
+      .sort((a, b) => {
+        const dateSort = b.date.localeCompare(a.date);
+        return dateSort || b.createdAt - a.createdAt;
+      });
+  }
+
+  function getLatestRecord(drawingId, pileNumber) {
+    return getPileRecords(drawingId, pileNumber)[0] || null;
+  }
+
+  function normalizeDrawing(drawing) {
+    if (!drawing) {
       return null;
     }
-
-    const length3m = intValue(record.length3m);
-    const length6m = intValue(record.length6m);
-    const length9m = intValue(record.length9m);
-    const length12m = intValue(record.length12m);
-    const totalPieces = length3m + length6m + length9m + length12m;
-    const totalMeters = length3m * 3 + length6m * 6 + length9m * 9 + length12m * 12;
-    const date = normalizeDateInput(record.date) || todayValue();
-    const ownerDeviceId = cleanText(record.ownerDeviceId) || (options.assignCurrentDevice ? currentDeviceId : "");
-
+    const id = cleanText(drawing.id) || uniqueId("drawing");
+    const piles = Array.isArray(drawing.piles) ? uniquePiles(drawing.piles.map(normalizePile).filter(Boolean)).sort(sortPiles) : [];
     return {
-      id: String(record.id),
-      projectName: cleanText(record.projectName),
-      blockName: cleanText(record.blockName),
-      username: cleanText(record.username),
-      pilingPointNumber: formatPilingPoint(record.pilingPointNumber) || cleanText(record.pilingPointNumber).toUpperCase(),
-      date,
-      length3m,
-      length6m,
-      length9m,
-      length12m,
-      reportNo: cleanText(record.reportNo),
-      pilingNo: cleanText(record.pilingNo),
-      pileSize: cleanText(record.pileSize),
-      setMm: cleanText(record.setMm),
-      tcMm: cleanText(record.tcMm),
-      penToBglMrt: cleanText(record.penToBglMrt),
-      cutOffLevel: cleanText(record.cutOffLevel),
-      payLength: cleanText(record.payLength),
-      remarks: cleanText(record.remarks),
-      totalPieces,
-      totalMeters,
-      totalWelding: weldingCount(totalPieces),
-      ownerDeviceId,
-      ownerUid: cleanText(record.ownerUid),
-      createdAt: Number(record.createdAt) || Date.now(),
-      updatedAt: Number(record.updatedAt) || Number(record.localUpdatedAt) || Date.now()
+      id,
+      fileName: cleanText(drawing.fileName) || "drawing.pdf",
+      projectTitle: cleanTitle(drawing.projectTitle),
+      drawingTitle: cleanTitle(drawing.drawingTitle),
+      pageCount: Number(drawing.pageCount) || 0,
+      gridLetters: parseList(Array.isArray(drawing.gridLetters) ? drawing.gridLetters.join(",") : drawing.gridLetters),
+      gridNumbers: parseList(Array.isArray(drawing.gridNumbers) ? drawing.gridNumbers.join(",") : drawing.gridNumbers),
+      piles,
+      importedAt: Number(drawing.importedAt) || Date.now(),
+      updatedAt: Number(drawing.updatedAt) || Date.now(),
+      pdfStored: Boolean(drawing.pdfStored),
+      extractionNote: cleanText(drawing.extractionNote)
     };
   }
 
-  function sortRecords(a, b) {
-    const aDate = dateKey(a.date);
-    const bDate = dateKey(b.date);
-    if (aDate !== bDate) {
-      return bDate.localeCompare(aDate);
+  function normalizePile(pile) {
+    if (!pile) {
+      return null;
     }
-    if (a.projectName !== b.projectName) {
-      return a.projectName.localeCompare(b.projectName);
+    const number = cleanText(pile.number || pile.pileNumber);
+    if (!number) {
+      return null;
     }
-    if (a.blockName !== b.blockName) {
-      return a.blockName.localeCompare(b.blockName);
+    return {
+      number,
+      grid: cleanText(pile.grid),
+      source: cleanText(pile.source) || "manual",
+      x: Number(pile.x) || 0,
+      y: Number(pile.y) || 0,
+      addedAt: Number(pile.addedAt) || Date.now()
+    };
+  }
+
+  function normalizeRecord(record) {
+    if (!record) {
+      return null;
     }
-    return a.pilingPointNumber.localeCompare(b.pilingPointNumber, undefined, { numeric: true });
-  }
-
-  function recordId(projectName, blockName, pilingPointNumber, date) {
-    return [projectName, blockName, pilingPointNumber, date].map(slug).join("__");
-  }
-
-  function slug(value) {
-    const text = cleanText(value).toLowerCase();
-    const asciiSlug = text
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80);
-
-    if (asciiSlug) {
-      return asciiSlug;
+    const drawingId = cleanText(record.drawingId);
+    const pileNumber = cleanText(record.pileNumber);
+    const date = normalizeDate(record.date);
+    const penetrationDepth = cleanText(record.penetrationDepth);
+    if (!drawingId || !pileNumber || !date || !penetrationDepth) {
+      return null;
     }
-
-    const encoded = Array.from(text)
-      .map((char) => char.codePointAt(0).toString(36))
-      .join("-");
-    return `x-${encoded}`.slice(0, 80);
+    return {
+      id: cleanText(record.id) || uniqueId("record"),
+      drawingId,
+      pileNumber,
+      grid: cleanText(record.grid),
+      date,
+      penetrationDepth,
+      remarks: cleanText(record.remarks),
+      createdAt: Number(record.createdAt) || Date.now(),
+      updatedAt: Number(record.updatedAt) || Date.now()
+    };
   }
 
-  function intValue(value) {
-    const number = Number.parseInt(value, 10);
-    if (!Number.isFinite(number) || number < 0) {
-      return 0;
+  async function ensurePdfJs() {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      return window.pdfjsLib;
     }
-    return number;
+    if (!pdfJsPromise) {
+      pdfJsPromise = loadScript(PDFJS_SCRIPT).then(() => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        return window.pdfjsLib;
+      });
+    }
+    return pdfJsPromise;
   }
 
-  function weldingCount(totalPieces) {
-    return Math.max(intValue(totalPieces) - 1, 0);
+  async function ensurePdfLib() {
+    if (window.PDFLib) {
+      return window.PDFLib;
+    }
+    if (!pdfLibPromise) {
+      pdfLibPromise = loadScript(PDFLIB_SCRIPT).then(() => window.PDFLib);
+    }
+    return pdfLibPromise;
   }
 
-  function canDeleteRecord(record) {
-    return !record.ownerDeviceId || record.ownerDeviceId === currentDeviceId;
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener("error", reject, { once: true });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = src;
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
   }
 
-  function formatPilingPointField() {
-    const formatted = formatPilingPoint(els.pilingPointNumber.value);
-    if (formatted) {
-      els.pilingPointNumber.value = formatted;
+  function openDb() {
+    if (!("indexedDB" in window)) {
+      return Promise.reject(new Error("IndexedDB unavailable"));
+    }
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore("pdfs", { keyPath: "id" });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    return dbPromise;
+  }
+
+  async function savePdfBytes(id, buffer) {
+    const db = await openDb();
+    return transact(db, "readwrite", (store) => store.put({ id, buffer, savedAt: Date.now() }));
+  }
+
+  async function readPdfBytes(id) {
+    const db = await openDb();
+    const record = await transact(db, "readonly", (store) => store.get(id));
+    return record?.buffer || null;
+  }
+
+  async function deletePdfBytes(id) {
+    const db = await openDb();
+    return transact(db, "readwrite", (store) => store.delete(id));
+  }
+
+  async function clearPdfBytes() {
+    const db = await openDb();
+    return transact(db, "readwrite", (store) => store.clear());
+  }
+
+  function transact(db, mode, callback) {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction("pdfs", mode);
+      const request = callback(transaction.objectStore("pdfs"));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  function registerServiceWorker() {
+    if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
+      navigator.serviceWorker.register("./sw.js?v=1.0.0").catch(() => {});
     }
   }
 
-  function formatPilingPoint(value) {
-    const text = cleanText(value).toUpperCase();
-    const match = text.match(/^(?:P\s*-?\s*)?(\d{1,})$/);
+  function groupClose(items, key, tolerance) {
+    const groups = [];
+    [...items]
+      .sort((a, b) => a[key] - b[key])
+      .forEach((item) => {
+        const group = groups[groups.length - 1];
+        if (group && Math.abs(average(group.map((current) => current[key])) - item[key]) <= tolerance) {
+          group.push(item);
+        } else {
+          groups.push([item]);
+        }
+      });
+    return groups;
+  }
+
+  function uniquePositionLabels(items, positionKey) {
+    const byText = new Map();
+    items.forEach((item) => {
+      if (!byText.has(item.text)) {
+        byText.set(item.text, item);
+        return;
+      }
+      const current = byText.get(item.text);
+      if (item[positionKey] < current[positionKey]) {
+        byText.set(item.text, item);
+      }
+    });
+    return [...byText.values()];
+  }
+
+  function uniquePiles(piles) {
+    const seen = new Set();
+    return piles.filter((pile) => {
+      const key = pile.number.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function uniqueStrings(values) {
+    return [...new Set(values.map(cleanText).filter(Boolean))];
+  }
+
+  function longestConsecutiveRun(values) {
+    let best = [];
+    let current = [];
+    values.forEach((value, index) => {
+      if (index === 0 || value === values[index - 1] + 1) {
+        current.push(value);
+      } else {
+        if (current.length > best.length) {
+          best = current;
+        }
+        current = [value];
+      }
+    });
+    return current.length > best.length ? current : best;
+  }
+
+  function nearestBy(items, value, key) {
+    return items.reduce((best, item) => {
+      if (!best || Math.abs(item[key] - value) < Math.abs(best[key] - value)) {
+        return item;
+      }
+      return best;
+    }, null);
+  }
+
+  function sortPiles(a, b) {
+    return a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function sortGrid(a, b) {
+    const [aLetter, aNumber] = a.split("/");
+    const [bLetter, bNumber] = b.split("/");
+    const letterSort = aLetter.localeCompare(bLetter, undefined, { numeric: true });
+    return letterSort || Number(aNumber) - Number(bNumber);
+  }
+
+  function parseList(value) {
+    return uniqueStrings(String(value || "").split(/[,;\s]+/));
+  }
+
+  function normalizeDate(value) {
+    const text = cleanText(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+    const match = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
     if (!match) {
       return "";
     }
-    return `P-${match[1].padStart(3, "0")}`;
+    return `${match[3]}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
+  }
+
+  function todayInputValue() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function formatDateForDisplay(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function titleFromFileName(fileName) {
+    return cleanTitle(String(fileName || "drawing").replace(/\.pdf$/i, "").replace(/[_-]+/g, " "));
+  }
+
+  function cleanTitle(value) {
+    return cleanText(value)
+      .replace(/\s*:\s*/g, ": ")
+      .replace(/\s+\/\s+/g, " / ")
+      .replace(/\s{2,}/g, " ")
+      .slice(0, 260);
   }
 
   function cleanText(value) {
     return String(value || "").trim().replace(/\s+/g, " ");
   }
 
-  function todayValue() {
-    const date = new Date();
-    return `${twoDigit(date.getDate())}.${twoDigit(date.getMonth() + 1)}.${date.getFullYear()}`;
+  function span(values) {
+    return values.length ? Math.max(...values) - Math.min(...values) : 0;
   }
 
-  function todayInputValue() {
-    return dateInputValue(todayValue());
+  function average(values) {
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
   }
 
-  function dateInputValue(value) {
-    const date = normalizeDateInput(value);
-    if (!date) {
-      return "";
+  function chunk(items, size) {
+    const chunks = [];
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
     }
-    const [day, month, year] = date.split(".");
-    return `${year}-${month}-${day}`;
+    return chunks.length ? chunks : [[]];
   }
 
-  function normalizeDateInput(value) {
+  function truncatePdfText(value, maxLength) {
     const text = cleanText(value);
-    let day;
-    let month;
-    let year;
-
-    const displayMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-    const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-
-    if (displayMatch) {
-      day = Number(displayMatch[1]);
-      month = Number(displayMatch[2]);
-      year = Number(displayMatch[3]);
-    } else if (isoMatch) {
-      year = Number(isoMatch[1]);
-      month = Number(isoMatch[2]);
-      day = Number(isoMatch[3]);
-    } else {
-      return "";
-    }
-
-    const date = new Date(year, month - 1, day);
-    if (
-      date.getFullYear() !== year ||
-      date.getMonth() !== month - 1 ||
-      date.getDate() !== day
-    ) {
-      return "";
-    }
-
-    return `${twoDigit(day)}.${twoDigit(month)}.${year}`;
-  }
-
-  function dateKey(value) {
-    const date = normalizeDateInput(value);
-    if (!date) {
-      return "";
-    }
-    const [day, month, year] = date.split(".");
-    return `${year}-${month}-${day}`;
-  }
-
-  function twoDigit(value) {
-    return String(value).padStart(2, "0");
-  }
-
-  function getDeviceId() {
-    const stored = localStorage.getItem(DEVICE_KEY);
-    if (stored) {
-      return stored;
-    }
-
-    const generated =
-      window.crypto && typeof window.crypto.randomUUID === "function"
-        ? window.crypto.randomUUID()
-        : `device-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem(DEVICE_KEY, generated);
-    return generated;
-  }
-
-  function filenamePart(value) {
-    return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "report";
+    return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
   }
 
   function csvCell(value) {
     const text = String(value ?? "");
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function filenamePart(value) {
+    return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "akz-piling-status";
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function uniqueId(prefix) {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return `${prefix}-${window.crypto.randomUUID()}`;
     }
-    return text;
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function showMessage(message, isError) {
+    els.appMessage.textContent = message;
+    els.appMessage.classList.toggle("error", Boolean(isError));
+    els.storageStatus.dataset.state = isError ? "error" : "local";
+    els.storageStatus.querySelector("span:last-child").textContent = isError ? "Needs review" : "Local data";
   }
 
   function escapeHtml(value) {

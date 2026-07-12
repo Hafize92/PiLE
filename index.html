@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#0f766e">
-    <title>PiLE</title>
+    <meta name="theme-color" content="#164e63">
+    <title>AkZ Piling Status</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=1.0.1-2">
-    <script defer src="app.js?v=1.0.1-2"></script>
+    <link rel="stylesheet" href="styles.css?v=1.0.0">
+    <script defer src="app.js?v=1.0.0"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -16,181 +16,185 @@
         <div class="brand-block">
           <img class="brand-mark" src="assets/hafize-mark.svg" alt="">
           <div>
-            <h1>PiLE</h1>
-            <p>ver 1.0.1</p>
+            <h1>AkZ Piling Status</h1>
+            <p>Local-first PDF piling tracker</p>
           </div>
         </div>
-        <div class="sync-pill" id="syncStatus" aria-live="polite">
+        <div class="status-pill" id="storageStatus" aria-live="polite">
           <span class="status-dot"></span>
-          <span>Local</span>
+          <span>Local data</span>
         </div>
       </header>
 
       <main class="workspace">
+        <section class="upload-panel" aria-labelledby="uploadTitle">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Drawing base</p>
+              <h2 id="uploadTitle">Uploaded PDFs</h2>
+            </div>
+            <label class="file-button">
+              <input id="pdfInput" type="file" accept="application/pdf" multiple>
+              <span>Upload PDF</span>
+            </label>
+          </div>
+
+          <div class="drawing-row">
+            <label>
+              <span>Active drawing</span>
+              <select id="drawingSelect"></select>
+            </label>
+            <button class="secondary-button" type="button" id="deleteDrawingButton">Remove</button>
+          </div>
+
+          <div class="meta-grid">
+            <label>
+              <span>Project title</span>
+              <input id="projectTitle" placeholder="Project title">
+            </label>
+            <label>
+              <span>Drawing title</span>
+              <input id="drawingTitle" placeholder="Drawing title">
+            </label>
+            <label>
+              <span>Grid letters</span>
+              <input id="gridLetters" placeholder="A,B,C,D,E,F,G,H,J,K,L,M,N">
+            </label>
+            <label>
+              <span>Grid numbers</span>
+              <input id="gridNumbers" placeholder="1,2,3,4,5,6,7,8,9,10">
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button class="secondary-button" type="button" id="saveDrawingButton">Save drawing</button>
+            <button class="secondary-button" type="button" id="exportCsvButton">Export CSV</button>
+            <button class="secondary-button" type="button" id="exportPdfButton">Export PDF</button>
+            <button class="danger-button" type="button" id="clearDataButton">Clear data</button>
+          </div>
+
+          <p class="message" id="appMessage" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="stats-panel" aria-label="Status summary">
+          <div>
+            <span class="stat-label">Piles</span>
+            <strong id="totalPiles">0</strong>
+          </div>
+          <div>
+            <span class="stat-label">Recorded</span>
+            <strong id="recordedPiles">0</strong>
+          </div>
+          <div>
+            <span class="stat-label">Pending</span>
+            <strong id="pendingPiles">0</strong>
+          </div>
+          <div>
+            <span class="stat-label">Progress</span>
+            <strong id="progressPercent">0%</strong>
+          </div>
+        </section>
+
         <section class="entry-panel" aria-labelledby="entryTitle">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Entry</p>
-              <h2 id="entryTitle">Piling record</h2>
+              <p class="eyebrow">Daily input</p>
+              <h2 id="entryTitle">Penetration record</h2>
             </div>
-            <button class="secondary-button reset-button" type="button" id="resetButton" aria-label="Reset input" title="Reset input">
-              <span>Reset</span>
-            </button>
+            <button class="secondary-button compact-button" type="button" id="resetEntryButton">Reset</button>
           </div>
 
           <form id="recordForm" autocomplete="off">
             <div class="field-grid">
               <label>
-                <span>Project Name</span>
-                <input id="projectName" name="projectName" required placeholder="Project A">
+                <span>Grid</span>
+                <select id="gridSelect"></select>
               </label>
               <label>
-                <span>Block Name</span>
-                <input id="blockName" name="blockName" required placeholder="Block 1">
+                <span>Pile number / point</span>
+                <select id="pileSelect"></select>
               </label>
               <label>
-                <span>Supervisor</span>
-                <input id="username" name="username" placeholder="Supervisor">
+                <span>Piling date</span>
+                <input id="pilingDate" type="date" required>
               </label>
               <label>
-                <span>Date</span>
-                <input id="recordDate" name="recordDate" type="date" required>
+                <span>Penetration depth</span>
+                <input id="penetrationDepth" inputmode="decimal" required placeholder="Depth">
               </label>
               <label class="span-2">
-                <span>Piling Point Numbers</span>
-                <input id="pilingPointNumber" name="pilingPointNumber" required inputmode="numeric" placeholder="P-001">
+                <span>Remarks</span>
+                <textarea id="recordRemarks" rows="2" placeholder="Remarks"></textarea>
               </label>
             </div>
 
-            <div class="length-panel">
-              <div class="length-head">
-                <div>
-                  <p class="eyebrow">Piling used</p>
-                  <h3>Length count</h3>
-                </div>
-                <div class="preview-stack">
-                  <output id="meterPreview" for="length3m length6m length9m length12m">0 m</output>
-                  <output id="weldingPreview" for="length3m length6m length9m length12m">0 welding</output>
-                </div>
-              </div>
-
-              <div class="length-grid">
-                <label>
-                  <span>3m</span>
-                  <input id="length3m" name="length3m" type="number" min="0" step="1" inputmode="numeric" value="0">
-                </label>
-                <label>
-                  <span>6m</span>
-                  <input id="length6m" name="length6m" type="number" min="0" step="1" inputmode="numeric" value="0">
-                </label>
-                <label>
-                  <span>9m</span>
-                  <input id="length9m" name="length9m" type="number" min="0" step="1" inputmode="numeric" value="0">
-                </label>
-                <label>
-                  <span>12m</span>
-                  <input id="length12m" name="length12m" type="number" min="0" step="1" inputmode="numeric" value="0">
-                </label>
-              </div>
-            </div>
-
-            <div class="detail-panel">
-              <div class="detail-head">
-                <p class="eyebrow">Daily summary fields</p>
-              </div>
-              <div class="field-grid">
-                <label>
-                  <span>Report No</span>
-                  <input id="reportNoInput" name="reportNoInput" placeholder="Report no">
-                </label>
-                <label>
-                  <span>Piling No</span>
-                  <input id="pilingNoInput" name="pilingNoInput" placeholder="Piling no">
-                </label>
-                <label>
-                  <span>Pile Size</span>
-                  <input id="pileSize" name="pileSize" placeholder="150x150">
-                </label>
-                <label>
-                  <span>Set (mm)</span>
-                  <input id="setMm" name="setMm" inputmode="decimal" placeholder="Set">
-                </label>
-                <label>
-                  <span>T.C. (mm)</span>
-                  <input id="tcMm" name="tcMm" inputmode="decimal" placeholder="T.C.">
-                </label>
-                <label>
-                  <span>Pen to BGL (MRT)</span>
-                  <input id="penToBglMrt" name="penToBglMrt" inputmode="decimal" placeholder="MRT">
-                </label>
-                <label>
-                  <span>Cut Off Level</span>
-                  <input id="cutOffLevel" name="cutOffLevel" placeholder="Level">
-                </label>
-                <label>
-                  <span>Pay Length</span>
-                  <input id="payLength" name="payLength" inputmode="decimal" placeholder="Length">
-                </label>
-                <label class="span-2">
-                  <span>Remarks</span>
-                  <textarea id="remarks" name="remarks" rows="2" placeholder="Remarks"></textarea>
-                </label>
-              </div>
-            </div>
-
-            <div class="form-actions">
-              <button class="primary-button" type="submit" id="saveButton">
-                <span aria-hidden="true">+</span>
-                <span>Save record</span>
-              </button>
-            </div>
+            <button class="primary-button" type="submit">Save progress</button>
           </form>
 
-          <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
+          <div class="history-block">
+            <div class="subhead">
+              <h3>Selected pile history</h3>
+            </div>
+            <div id="pileHistory" class="history-list"></div>
+          </div>
         </section>
 
-        <section class="records-panel" aria-labelledby="recordsTitle">
-          <div class="panel-head records-head">
+        <section class="register-panel" aria-labelledby="registerTitle">
+          <div class="panel-head">
             <div>
-              <p class="eyebrow">By date</p>
-              <h2 id="recordsTitle">Record list</h2>
+              <p class="eyebrow">Review</p>
+              <h2 id="registerTitle">Pile register</h2>
             </div>
-            <button class="icon-button" type="button" id="exportButton" aria-label="Export CSV" title="Export CSV">
-              <span aria-hidden="true">CSV</span>
-            </button>
+            <div class="register-tools">
+              <input id="pileSearch" class="search-input" placeholder="Search pile or grid">
+              <button class="secondary-button compact-button" type="button" id="addPileButton">Add pile</button>
+            </div>
           </div>
 
-          <div class="filter-row">
-            <label class="search-field">
-              <span>Search</span>
-              <input id="searchInput" placeholder="Project, block, point, supervisor">
+          <div class="range-row">
+            <label>
+              <span>Start</span>
+              <input id="rangeStart" inputmode="numeric" placeholder="1">
             </label>
-            <select id="projectFilter" aria-label="Filter by project">
-              <option value="">All projects</option>
-            </select>
+            <label>
+              <span>End</span>
+              <input id="rangeEnd" inputmode="numeric" placeholder="464">
+            </label>
+            <label>
+              <span>Prefix</span>
+              <input id="rangePrefix" placeholder="">
+            </label>
+            <label>
+              <span>Grid</span>
+              <select id="rangeGrid"></select>
+            </label>
+            <button class="secondary-button" type="button" id="addRangeButton">Add range</button>
           </div>
 
-          <div class="report-row" aria-label="Daily report">
-            <select id="reportDate" aria-label="Daily report date">
-              <option value="">No dates</option>
-            </select>
-            <select id="reportSite" aria-label="Daily report site">
-              <option value="">All sites</option>
-            </select>
-            <select id="reportFormat" aria-label="Daily report format">
-              <option value="pdf">PDF</option>
-              <option value="word">Word</option>
-            </select>
-            <button class="secondary-button" type="button" id="reportButton">Daily report</button>
+          <div class="table-wrap">
+            <table class="status-table">
+              <thead>
+                <tr>
+                  <th>Pile</th>
+                  <th>Grid</th>
+                  <th>Latest date</th>
+                  <th>Depth</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="statusBody"></tbody>
+            </table>
           </div>
 
-          <div class="record-list" id="recordList"></div>
           <div class="empty-state" id="emptyState">
             <img src="assets/hafize-mark.svg" alt="">
-            <p>No records yet.</p>
+            <p>No drawing loaded.</p>
           </div>
         </section>
       </main>
     </div>
+
+    <div class="app-version">Ver1.0.0</div>
   </body>
 </html>

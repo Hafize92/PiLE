@@ -1,71 +1,50 @@
-# PiLE App Design
+# AkZ Piling Status Design
 
 ## Goal
 
-PiLE is a local-first piling record app for Android and iOS users. Site teams can enter piling usage by project, block, piling point, date, and pile length. Each user keeps their own records on their browser/device and sends reports individually.
+AkZ Piling Status is a local-first PDF piling tracker. Site teams upload setting-out PDFs, review extracted drawing information, maintain a pile register by grid, and record piling date plus penetration depth until the drawing is complete.
 
-## First Version
+## Product Shape
 
-The first version is a mobile-first PWA:
+The first screen is the working app, not a landing page:
 
-- Runs in mobile browsers on Android and iOS.
-- Can be installed to the home screen when served over HTTPS.
-- Stores data locally in the user's browser.
-- Does not use cloud storage.
-- Can later be wrapped into Android/iOS apps with Capacitor without changing the core screen.
-
-## Core Screen
-
-The first screen is the working record screen:
-
-- Project Name
-- Block Name
-- Supervisor
-- Piling Point Numbers
-- Calendar date input, displayed as `day.month.year`
-- 3m, 6m, 9m, 12m counts
-- Per-record total pieces, total meters, and no. of welding
-- Date-grouped record list
-- Project/search filters
-- CSV export
-- Daily report export by date and site, with PDF and Word output
+- PDF upload and active drawing selector
+- Editable project title and drawing title
+- Editable grid letters and grid numbers
+- Pile register with per-pile grid dropdown
+- Daily input form for grid, pile number, piling date, penetration depth, and remarks
+- Latest status table and selected-pile history
+- CSV export and original-PDF based status PDF output
+- Fixed bottom-right `Ver1.0.0`
 
 ## Local Architecture
 
 ```mermaid
 flowchart LR
-  UserA["Android / iOS User"] --> App["PiLE App"]
-  App <--> Storage["Browser localStorage"]
-  App --> Report["PDF / Word report"]
-  Report --> Boss["Boss"]
+  User["Windows / Android / iOS browser"] --> App["AkZ Piling Status"]
+  App <--> LS["localStorage records"]
+  App <--> IDB["IndexedDB PDF files"]
+  App --> CSV["CSV export"]
+  App --> PDF["Original PDF + status summary"]
 ```
 
-When a user saves a record, it is stored in that browser only. The same user can edit and delete their local records, then export a daily report as PDF or Word.
+Data belongs to the browser/device. Updating the hosted app revision does not clear the user's local project records.
 
-## Record Identity
+## PDF Extraction
 
-A record is identified by:
+The app reads the PDF text layer in the browser using PDF.js:
 
-```text
-Project Name + Block Name + Piling Point Numbers + Date
-```
+- Project title and drawing title are extracted from title block labels when readable.
+- Grid letters and grid numbers are detected from aligned text labels when readable.
+- Pile numbers are detected when the PDF contains normal text pile labels.
+- CAD/vector pile numbers that are not exposed as PDF text are handled through the editable review table and range import.
 
-Saving the same point on the same date updates the existing record. This avoids duplicate records when multiple users are working on the same block.
+## Versioning
 
-## Recommended Production Steps
+Use semantic app display versions:
 
-1. Host the static files over HTTPS.
-2. Ask each user to install the PWA or open the hosted link.
-3. Users keep their own local records and send reports individually.
-4. Wrap with Capacitor for Play Store and App Store builds if needed.
+- `Ver1.0.0` for this first AkZ release
+- `Ver1.0.1` for minor fixes
+- `Ver1.1.0` for larger feature changes
 
-## Future Enhancements
-
-- Login with phone number or company email.
-- Project-level user permissions.
-- Import/export to Excel.
-- Supervisor approval status.
-- Photo attachment for each piling point.
-- GPS/location stamp.
-- Audit history per record.
-- Report template customization.
+The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.
