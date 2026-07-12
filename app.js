@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.1";
+  const APP_VERSION = "1.0.2";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -524,7 +524,8 @@
           grid: position ? nearestGrid({ x: position.x, top: position.y }, gridModel) : "",
           source: "sequence-fill",
           x: position?.x || 0,
-          y: position?.y || 0
+          y: position?.y || 0,
+          coordinateScale: position?.coordinateScale || OCR_MASK_SCALE
         })
       );
     }
@@ -574,14 +575,15 @@
       const ratio = (value - lower) / spanValue;
       return {
         x: lowerPile.x + (upperPile.x - lowerPile.x) * ratio,
-        y: lowerPile.y + (upperPile.y - lowerPile.y) * ratio
+        y: lowerPile.y + (upperPile.y - lowerPile.y) * ratio,
+        coordinateScale: Number(lowerPile.coordinateScale) || Number(upperPile.coordinateScale) || OCR_MASK_SCALE
       };
     }
     if (lowerPile) {
-      return { x: lowerPile.x, y: lowerPile.y };
+      return { x: lowerPile.x, y: lowerPile.y, coordinateScale: Number(lowerPile.coordinateScale) || OCR_MASK_SCALE };
     }
     if (upperPile) {
-      return { x: upperPile.x, y: upperPile.y };
+      return { x: upperPile.x, y: upperPile.y, coordinateScale: Number(upperPile.coordinateScale) || OCR_MASK_SCALE };
     }
     return null;
   }
@@ -647,7 +649,8 @@
       grid: nearestGrid({ x: centerX, top: centerY }, plan.gridModel),
       source: "red-ocr",
       x: centerX,
-      y: centerY
+      y: centerY,
+      coordinateScale: OCR_MASK_SCALE
     });
   }
 
@@ -1424,6 +1427,7 @@
       pdfDoc.setSubject(`AkZ Piling Status Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
       pdfDoc.setKeywords(["AkZ Piling Status", `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
       stampOriginalPdfPage(PDFLib, pages[0], font, drawing, recorded, summaryRows.length);
+      annotatePileRecordsOnOriginalPage(PDFLib, pages[0], font, drawing);
       appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
 
       const outputBytes = await pdfDoc.save({ useObjectStreams: false });
@@ -1476,6 +1480,253 @@
       font,
       color: PDFLib.rgb(0.26, 0.32, 0.35)
     });
+  }
+
+  function annotatePileRecordsOnOriginalPage(PDFLib, page, font, drawing) {
+    if (!page) {
+      return;
+    }
+
+    const geometry = pdfPageGeometry(page);
+    const pileKeepouts = drawing.piles
+      .map((pile) => pileDisplayPoint(pile, geometry))
+      .filter(Boolean)
+      .map(pileAnnotationKeepout);
+
+    const annotated = drawing.piles
+      .map((pile) => {
+        const latest = getLatestRecord(drawing.id, pile.number);
+        const point = pileDisplayPoint(pile, geometry);
+        if (!latest || !point) {
+          return null;
+        }
+        return {
+          pile,
+          latest,
+          point,
+          text: `${shortDate(latest.date)} ${cleanText(latest.penetrationDepth)}`
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.point.y - b.point.y || a.point.x - b.point.x);
+
+    if (!annotated.length) {
+      return;
+    }
+
+    const fontSize = annotationFontSize(annotated.length);
+    const lineHeight = fontSize + 1.5;
+    const occupied = [];
+    const blue = PDFLib.rgb(0.03, 0.25, 0.9);
+    const textRotation = PDFLib.degrees(displayTextRotation(geometry.rotation));
+
+    annotated.forEach((item) => {
+      const textWidth = Math.max(font.widthOfTextAtSize(item.text, fontSize), 18);
+      const label = placeAnnotationLabel(item.point, textWidth, lineHeight, geometry.display, occupied, pileKeepouts);
+      occupied.push(label.rect);
+      const pilePoint = displayToPdfPoint(item.point, geometry);
+      const anchorPoint = displayToPdfPoint({ x: label.anchorX, y: label.anchorY }, geometry);
+      const textPoint = displayToPdfPoint({ x: label.x, y: label.y }, geometry);
+
+      page.drawLine({
+        start: pilePoint,
+        end: anchorPoint,
+        thickness: 0.45,
+        color: blue,
+        opacity: 0.82
+      });
+      page.drawCircle({
+        x: pilePoint.x,
+        y: pilePoint.y,
+        size: Math.max(1.1, fontSize * 0.22),
+        color: blue,
+        opacity: 0.9
+      });
+      page.drawText(item.text, {
+        x: textPoint.x,
+        y: textPoint.y,
+        size: fontSize,
+        font,
+        color: blue,
+        opacity: 0.96,
+        rotate: textRotation
+      });
+    });
+  }
+
+  function annotationFontSize(count) {
+    if (count > 120) {
+      return 4.8;
+    }
+    if (count > 60) {
+      return 5.4;
+    }
+    if (count > 25) {
+      return 6.2;
+    }
+    return 7;
+  }
+
+  function pdfPageGeometry(page) {
+    const media = page.getSize();
+    const rotation = normalizedPageRotation(page);
+    return {
+      media,
+      rotation,
+      display: displayedPageSize(media, rotation)
+    };
+  }
+
+  function normalizedPageRotation(page) {
+    const angle = Number(page.getRotation?.().angle) || 0;
+    return ((angle % 360) + 360) % 360;
+  }
+
+  function displayedPageSize(media, rotation) {
+    if (rotation === 90 || rotation === 270) {
+      return { width: media.height, height: media.width };
+    }
+    return { width: media.width, height: media.height };
+  }
+
+  function pileDisplayPoint(pile, geometry) {
+    const x = Number(pile.x);
+    const y = Number(pile.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) {
+      return null;
+    }
+
+    const scale = inferredPileCoordinateScale(pile, geometry.display);
+    if (scale > 1.05 || /red-ocr|sequence-fill/.test(pile.source)) {
+      return {
+        x: clamp(x / scale, 4, geometry.display.width - 4),
+        y: clamp(geometry.display.height - y / scale, 4, geometry.display.height - 4)
+      };
+    }
+
+    return pdfToDisplayPoint(
+      {
+        x: clamp(x, 4, geometry.media.width - 4),
+        y: clamp(y, 4, geometry.media.height - 4)
+      },
+      geometry
+    );
+  }
+
+  function inferredPileCoordinateScale(pile, displaySize) {
+    const stored = Number(pile.coordinateScale);
+    if (Number.isFinite(stored) && stored > 0) {
+      return stored;
+    }
+
+    if (/red-ocr|sequence-fill/.test(pile.source)) {
+      return OCR_MASK_SCALE;
+    }
+
+    const x = Number(pile.x) || 0;
+    const y = Number(pile.y) || 0;
+    const xScale = x > displaySize.width ? x / displaySize.width : 1;
+    const yScale = y > displaySize.height ? y / displaySize.height : 1;
+    const scale = Math.max(xScale, yScale);
+    return scale > 1.05 ? scale : 1;
+  }
+
+  function displayToPdfPoint(point, geometry) {
+    switch (geometry.rotation) {
+      case 90:
+        return { x: geometry.media.width - point.y, y: point.x };
+      case 180:
+        return { x: geometry.media.width - point.x, y: geometry.media.height - point.y };
+      case 270:
+        return { x: point.y, y: geometry.media.height - point.x };
+      default:
+        return { x: point.x, y: point.y };
+    }
+  }
+
+  function pdfToDisplayPoint(point, geometry) {
+    switch (geometry.rotation) {
+      case 90:
+        return { x: point.y, y: geometry.media.width - point.x };
+      case 180:
+        return { x: geometry.media.width - point.x, y: geometry.media.height - point.y };
+      case 270:
+        return { x: geometry.media.height - point.y, y: point.x };
+      default:
+        return { x: point.x, y: point.y };
+    }
+  }
+
+  function displayTextRotation(rotation) {
+    return rotation === 90 || rotation === 180 || rotation === 270 ? rotation : 0;
+  }
+
+  function pileAnnotationKeepout(point) {
+    return {
+      x0: point.x - 24,
+      y0: point.y - 16,
+      x1: point.x + 24,
+      y1: point.y + 16
+    };
+  }
+
+  function placeAnnotationLabel(point, width, height, pageSize, occupied, keepouts = []) {
+    const margin = 8;
+    const candidates = annotationCandidates(point, width, height);
+    let best = null;
+
+    candidates.forEach((candidate) => {
+      const rect = {
+        x0: clamp(candidate.x, margin, pageSize.width - width - margin),
+        y0: clamp(candidate.y, margin, pageSize.height - height - margin),
+        x1: 0,
+        y1: 0
+      };
+      rect.x1 = rect.x0 + width;
+      rect.y1 = rect.y0 + height;
+      const anchorX = clamp(rect.x0 + (point.x < rect.x0 ? 0 : width), rect.x0, rect.x1);
+      const anchorY = clamp(rect.y0 + height * 0.45, rect.y0, rect.y1);
+      const overlap = occupied.reduce((sum, item) => sum + rectOverlapArea(rect, item), 0);
+      const keepoutOverlap = keepouts.reduce((sum, item) => sum + rectOverlapArea(rect, item), 0);
+      const distance = Math.hypot(rect.x0 + width / 2 - point.x, rect.y0 + height / 2 - point.y);
+      const score = overlap * 1000 + keepoutOverlap * 500 + distance + edgePenalty(rect, pageSize);
+      if (!best || score < best.score) {
+        best = { rect, x: rect.x0, y: rect.y0, anchorX, anchorY, score };
+      }
+    });
+
+    return best;
+  }
+
+  function annotationCandidates(point, width, height) {
+    const candidates = [];
+    [8, 16, 26, 40, 58].forEach((gap) => {
+      candidates.push({ x: point.x + gap, y: point.y + gap * 0.25 });
+      candidates.push({ x: point.x - width - gap, y: point.y + gap * 0.25 });
+      candidates.push({ x: point.x + gap, y: point.y - height - gap * 0.25 });
+      candidates.push({ x: point.x - width - gap, y: point.y - height - gap * 0.25 });
+      candidates.push({ x: point.x - width / 2, y: point.y + gap });
+      candidates.push({ x: point.x - width / 2, y: point.y - height - gap });
+    });
+    return candidates;
+  }
+
+  function rectOverlapArea(a, b) {
+    const width = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+    const height = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+    return width * height;
+  }
+
+  function edgePenalty(rect, pageSize) {
+    const margin = 16;
+    let penalty = 0;
+    if (rect.x0 < margin || rect.x1 > pageSize.width - margin) {
+      penalty += 20;
+    }
+    if (rect.y0 < margin || rect.y1 > pageSize.height - margin) {
+      penalty += 20;
+    }
+    return penalty;
   }
 
   function appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, rows) {
@@ -1613,6 +1864,7 @@
       source: cleanText(pile.source) || "manual",
       x: Number(pile.x) || 0,
       y: Number(pile.y) || 0,
+      coordinateScale: Number(pile.coordinateScale) || 0,
       addedAt: Number(pile.addedAt) || Date.now()
     };
   }
@@ -1742,7 +1994,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.1").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.2").catch(() => {});
     }
   }
 
@@ -1856,6 +2108,15 @@
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   }
 
+  function shortDate(value) {
+    const date = normalizeDate(value);
+    if (!date) {
+      return cleanText(value);
+    }
+    const [, month, day] = date.split("-");
+    return `${day}/${month}`;
+  }
+
   function titleFromFileName(fileName) {
     return cleanTitle(String(fileName || "drawing").replace(/\.pdf$/i, "").replace(/[_-]+/g, " "));
   }
@@ -1878,6 +2139,10 @@
 
   function average(values) {
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
   }
 
   function chunk(items, size) {

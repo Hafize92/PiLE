@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.1`
+Ver `1.0.2`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -22,7 +22,7 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 4. Record piling date and penetration depth against each pile number / grid.
 5. Export CSV or a PDF output based on the original uploaded PDF.
 
-The exported PDF keeps the original drawing and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
+The exported PDF keeps the original drawing, writes saved piling date/depth notes in blue near the recorded pile locations, and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
 
 ## Visual Extraction
 
@@ -35,6 +35,15 @@ The app uses PDF.js to render page 1 of the drawing in the browser, then:
 - When a dense sequence such as `1..464` is detected, drops OCR outliers and fills missed sequence numbers by interpolating from nearby detected labels.
 
 All extracted pile numbers and grids remain editable in the review table.
+
+## PDF Markups
+
+When exporting PDF after saving progress records:
+
+- Each recorded pile with a detected drawing coordinate gets a compact blue note beside the pile point.
+- The note uses `DD/MM depth`, for example `12/07 18.2m`.
+- Notes are offset from the pile point and collision-checked so they do not stack directly on top of each other.
+- Piles added manually without drawing coordinates still appear in the summary pages.
 
 ## Local Data
 
@@ -49,7 +58,7 @@ Records are stored locally in the user's browser:
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.1`
+- Minor revision: `Ver1.0.2`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.
