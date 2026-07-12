@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.2";
+  const APP_VERSION = "1.0.3";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -31,7 +31,8 @@
     pendingPiles: document.querySelector("#pendingPiles"),
     progressPercent: document.querySelector("#progressPercent"),
     recordForm: document.querySelector("#recordForm"),
-    gridSelect: document.querySelector("#gridSelect"),
+    gridXSelect: document.querySelector("#gridXSelect"),
+    gridYSelect: document.querySelector("#gridYSelect"),
     pileSelect: document.querySelector("#pileSelect"),
     pilingDate: document.querySelector("#pilingDate"),
     penetrationDepth: document.querySelector("#penetrationDepth"),
@@ -71,10 +72,8 @@
     els.clearDataButton.addEventListener("click", clearAllData);
     els.recordForm.addEventListener("submit", saveProgressRecord);
     els.resetEntryButton.addEventListener("click", resetEntryForm);
-    els.gridSelect.addEventListener("change", () => {
-      renderPileSelect();
-      renderHistory();
-    });
+    els.gridXSelect.addEventListener("change", handleEntryGridChange);
+    els.gridYSelect.addEventListener("change", handleEntryGridChange);
     els.pileSelect.addEventListener("change", renderHistory);
     els.pileSearch.addEventListener("input", renderStatusTable);
     els.addPileButton.addEventListener("click", addSinglePile);
@@ -85,6 +84,12 @@
 
     render();
     registerServiceWorker();
+  }
+
+  function handleEntryGridChange() {
+    renderGridSelects();
+    renderPileSelect();
+    renderHistory();
   }
 
   function loadAppState() {
@@ -1082,8 +1087,15 @@
       showMessage("Enter penetration depth.", true);
       return;
     }
+    if (getLatestRecord(drawing.id, pile.number)) {
+      showMessage("This pile is already recorded. Clear its record before entering it again.", true);
+      renderPileSelect();
+      renderHistory();
+      return;
+    }
 
-    const grid = els.gridSelect.value || pile.grid || "";
+    const selectedGrid = composeGrid(els.gridXSelect.value, els.gridYSelect.value);
+    const grid = selectedGrid || pile.grid || "";
     if (grid && grid !== pile.grid) {
       pile.grid = grid;
     }
@@ -1111,7 +1123,9 @@
   }
 
   function resetEntryForm() {
-    els.gridSelect.value = "";
+    els.gridXSelect.value = "";
+    els.gridYSelect.value = "";
+    renderGridSelects();
     renderPileSelect();
     els.pilingDate.value = todayInputValue();
     els.penetrationDepth.value = "";
@@ -1136,11 +1150,34 @@
     }
 
     if (button.dataset.action === "select") {
-      els.gridSelect.value = pile.grid || "";
+      if (getLatestRecord(drawing.id, pile.number)) {
+        showMessage("This pile is already recorded. Clear its record before entering it again.", true);
+        return;
+      }
+      const grid = splitGrid(pile.grid);
+      els.gridXSelect.value = grid.x;
+      els.gridYSelect.value = grid.y;
+      renderGridSelects();
       renderPileSelect();
       els.pileSelect.value = pile.number;
       renderHistory();
       window.scrollTo({ top: document.querySelector(".entry-panel").offsetTop - 12, behavior: "smooth" });
+    }
+
+    if (button.dataset.action === "clear-records") {
+      const records = getPileRecords(drawing.id, pile.number);
+      if (!records.length) {
+        showMessage("No record to clear.", true);
+        return;
+      }
+      const ok = window.confirm(`Clear ${pile.number} record${records.length === 1 ? "" : "s"} and return it to Daily input?`);
+      if (!ok) {
+        return;
+      }
+      state.records = state.records.filter((record) => !(record.drawingId === drawing.id && record.pileNumber === pile.number));
+      persist();
+      render();
+      showMessage(`${pile.number} returned to Daily input.`);
     }
 
     if (button.dataset.action === "remove") {
@@ -1228,16 +1265,28 @@
   function renderGridSelects() {
     const drawing = getActiveDrawing();
     const gridOptions = drawing ? getGridOptions(drawing) : [];
-    const entryCurrent = els.gridSelect.value;
+    let entryXCurrent = els.gridXSelect.value;
+    let entryYCurrent = els.gridYSelect.value;
     const rangeCurrent = els.rangeGrid.value;
     const gridHtml = gridOptions.map((grid) => `<option value="${escapeAttr(grid)}">${escapeHtml(grid)}</option>`).join("");
 
-    els.gridSelect.innerHTML = `<option value="">All grids</option>${gridHtml}`;
+    let xOptions = drawing ? getEntryGridAxisOptions(drawing, "x", { y: entryYCurrent }) : [];
+    if (entryXCurrent && !xOptions.includes(entryXCurrent)) {
+      entryXCurrent = "";
+    }
+    let yOptions = drawing ? getEntryGridAxisOptions(drawing, "y", { x: entryXCurrent }) : [];
+    if (entryYCurrent && !yOptions.includes(entryYCurrent)) {
+      entryYCurrent = "";
+    }
+    xOptions = drawing ? getEntryGridAxisOptions(drawing, "x", { y: entryYCurrent }) : [];
+    yOptions = drawing ? getEntryGridAxisOptions(drawing, "y", { x: entryXCurrent }) : [];
+
+    els.gridXSelect.innerHTML = `<option value="">All X-axis</option>${xOptions.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join("")}`;
+    els.gridYSelect.innerHTML = `<option value="">All Y-axis</option>${yOptions.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join("")}`;
     els.rangeGrid.innerHTML = `<option value="">Unassigned</option>${gridHtml}`;
 
-    if (gridOptions.includes(entryCurrent) || entryCurrent === "") {
-      els.gridSelect.value = entryCurrent;
-    }
+    els.gridXSelect.value = xOptions.includes(entryXCurrent) ? entryXCurrent : "";
+    els.gridYSelect.value = yOptions.includes(entryYCurrent) ? entryYCurrent : "";
     if (gridOptions.includes(rangeCurrent) || rangeCurrent === "") {
       els.rangeGrid.value = rangeCurrent;
     }
@@ -1246,13 +1295,20 @@
   function renderPileSelect() {
     const drawing = getActiveDrawing();
     const current = els.pileSelect.value;
-    const grid = els.gridSelect.value;
-    const piles = drawing ? drawing.piles.filter((pile) => !grid || pile.grid === grid).sort(sortPiles) : [];
+    const gridX = els.gridXSelect.value;
+    const gridY = els.gridYSelect.value;
+    const piles = drawing
+      ? getPendingPiles(drawing)
+          .filter((pile) => pileMatchesEntryGrid(pile, gridX, gridY))
+          .sort(sortPiles)
+      : [];
     els.pileSelect.innerHTML = piles.length
       ? piles.map((pile) => `<option value="${escapeAttr(pile.number)}">${escapeHtml(pile.number)}</option>`).join("")
-      : `<option value="">No piles</option>`;
+      : `<option value="">No pending piles</option>`;
     if (piles.some((pile) => pile.number === current)) {
       els.pileSelect.value = current;
+    } else if (piles.length) {
+      els.pileSelect.value = piles[0].number;
     }
   }
 
@@ -1307,7 +1363,11 @@
         <td>${escapeHtml(latest?.penetrationDepth || "-")}</td>
         <td><span class="${statusClass}">${latest ? "Recorded" : "Pending"}</span></td>
         <td class="row-actions">
-          <button class="secondary-button mini-button" type="button" data-action="select" data-pile="${escapeAttr(pile.number)}">Select</button>
+          ${
+            latest
+              ? `<button class="secondary-button mini-button" type="button" data-action="clear-records" data-pile="${escapeAttr(pile.number)}">Clear record</button>`
+              : `<button class="secondary-button mini-button" type="button" data-action="select" data-pile="${escapeAttr(pile.number)}">Select</button>`
+          }
           <button class="danger-button mini-button" type="button" data-action="remove" data-pile="${escapeAttr(pile.number)}">Remove</button>
         </td>
       </tr>
@@ -1349,7 +1409,8 @@
       els.scanDrawingButton,
       els.exportCsvButton,
       els.exportPdfButton,
-      els.gridSelect,
+      els.gridXSelect,
+      els.gridYSelect,
       els.pileSelect,
       els.pilingDate,
       els.penetrationDepth,
@@ -1806,6 +1867,50 @@
     return state.drawings.find((drawing) => drawing.id === state.activeDrawingId) || null;
   }
 
+  function getPendingPiles(drawing) {
+    if (!drawing) {
+      return [];
+    }
+    return drawing.piles.filter((pile) => !getLatestRecord(drawing.id, pile.number));
+  }
+
+  function getEntryGridAxisOptions(drawing, axis, filters = {}) {
+    const values = getPendingPiles(drawing)
+      .map((pile) => splitGrid(pile.grid))
+      .filter((grid) => grid.x || grid.y)
+      .filter((grid) => !filters.x || grid.x === filters.x)
+      .filter((grid) => !filters.y || grid.y === filters.y)
+      .map((grid) => (axis === "x" ? grid.x : grid.y));
+
+    return uniqueStrings(values).sort(axis === "x" ? sortAxisLabel : sortAxisNumber);
+  }
+
+  function pileMatchesEntryGrid(pile, x, y) {
+    const grid = splitGrid(pile.grid);
+    return (!x || grid.x === x) && (!y || grid.y === y);
+  }
+
+  function splitGrid(grid) {
+    const text = cleanText(grid);
+    if (!text) {
+      return { x: "", y: "" };
+    }
+    const parts = text.split("/");
+    if (parts.length >= 2) {
+      return {
+        x: cleanText(parts[0]),
+        y: cleanText(parts.slice(1).join("/"))
+      };
+    }
+    return { x: text, y: "" };
+  }
+
+  function composeGrid(x, y) {
+    const gridX = cleanText(x);
+    const gridY = cleanText(y);
+    return gridX && gridY ? `${gridX}/${gridY}` : "";
+  }
+
   function getGridOptions(drawing) {
     const cross = [];
     drawing.gridLetters.forEach((letter) => {
@@ -1994,7 +2099,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.2").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.3").catch(() => {});
     }
   }
 
@@ -2082,6 +2187,19 @@
     const [bLetter, bNumber] = b.split("/");
     const letterSort = aLetter.localeCompare(bLetter, undefined, { numeric: true });
     return letterSort || Number(aNumber) - Number(bNumber);
+  }
+
+  function sortAxisLabel(a, b) {
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function sortAxisNumber(a, b) {
+    const aNumber = Number(a);
+    const bNumber = Number(b);
+    if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) {
+      return aNumber - bNumber;
+    }
+    return sortAxisLabel(a, b);
   }
 
   function parseList(value) {

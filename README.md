@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.2`
+Ver `1.0.3`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -9,7 +9,7 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 - Uploaded PDF drawing metadata
 - Project title and drawing title extracted from the PDF text layer where available
 - X/Y grid letters and numbers detected from drawing grid lines where available
-- Pile numbers / points with an editable grid dropdown
+- Pile numbers / points with editable grid assignment
 - Piling date
 - Penetration depth
 - Remarks and full local history per pile
@@ -19,8 +19,11 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 1. Upload one or more PDF drawings.
 2. Review the extracted project title, drawing title, grid, and pile register.
 3. The app scans the rendered drawing for red pile-number labels and X/Y grid axes.
-4. Record piling date and penetration depth against each pile number / grid.
-5. Export CSV or a PDF output based on the original uploaded PDF.
+4. Filter Daily input by separate X-axis and Y-axis grid dropdowns.
+5. Record piling date and penetration depth against each pending pile number / grid.
+6. Export CSV or a PDF output based on the original uploaded PDF.
+
+Recorded piles are removed from the Daily input dropdowns so users do not accidentally enter the same pile twice. Clearing a pile record from the pile register returns that pile to Daily input.
 
 The exported PDF keeps the original drawing, writes saved piling date/depth notes in blue near the recorded pile locations, and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
 
@@ -58,7 +61,7 @@ Records are stored locally in the user's browser:
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.2`
+- Minor revision: `Ver1.0.3`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.

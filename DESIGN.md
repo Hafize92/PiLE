@@ -12,10 +12,10 @@ The first screen is the working app, not a landing page:
 - Editable project title and drawing title
 - Editable grid letters and grid numbers
 - Pile register with per-pile grid dropdown
-- Daily input form for grid, pile number, piling date, penetration depth, and remarks
+- Daily input form for X-axis grid, Y-axis grid, pending pile number, piling date, penetration depth, and remarks
 - Latest status table and selected-pile history
 - CSV export and original-PDF based status PDF output
-- Fixed bottom-right `Ver1.0.2`
+- Fixed bottom-right `Ver1.0.3`
 
 ## Local Architecture
 
@@ -47,6 +47,7 @@ Use semantic app display versions:
 - `Ver1.0.0` for the first AkZ release
 - `Ver1.0.1` for red pile-number and X/Y grid visual extraction
 - `Ver1.0.2` for blue in-drawing PDF date/depth markups
+- `Ver1.0.3` for split X/Y Daily input and pending-only pile choices
 - `Ver1.1.0` for larger feature changes
 
 The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.
