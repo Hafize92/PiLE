@@ -15,7 +15,7 @@ The first screen is the working app, not a landing page:
 - Daily input form for grid, pile number, piling date, penetration depth, and remarks
 - Latest status table and selected-pile history
 - CSV export and original-PDF based status PDF output
-- Fixed bottom-right `Ver1.0.0`
+- Fixed bottom-right `Ver1.0.1`
 
 ## Local Architecture
 
@@ -32,19 +32,20 @@ Data belongs to the browser/device. Updating the hosted app revision does not cl
 
 ## PDF Extraction
 
-The app reads the PDF text layer in the browser using PDF.js:
+The app reads both the PDF text layer and a rendered drawing image in the browser:
 
 - Project title and drawing title are extracted from title block labels when readable.
-- Grid letters and grid numbers are detected from aligned text labels when readable.
-- Pile numbers are detected when the PDF contains normal text pile labels.
-- CAD/vector pile numbers that are not exposed as PDF text are handled through the editable review table and range import.
+- X-axis grid lines are detected from the drawing geometry and labeled with grid letters.
+- Y-axis grid lines are detected from the left-side grid extension and labeled with grid numbers.
+- Red pile-number labels are OCR-scanned from a red-only image mask.
+- Dense numbered sequences are completed after OCR outliers are removed, then reviewed in the editable table.
 
 ## Versioning
 
 Use semantic app display versions:
 
-- `Ver1.0.0` for this first AkZ release
-- `Ver1.0.1` for minor fixes
+- `Ver1.0.0` for the first AkZ release
+- `Ver1.0.1` for red pile-number and X/Y grid visual extraction
 - `Ver1.1.0` for larger feature changes
 
 The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.

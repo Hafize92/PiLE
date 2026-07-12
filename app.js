@@ -1,13 +1,16 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.0";
+  const APP_VERSION = "1.0.1";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
   const PDFJS_SCRIPT = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
   const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   const PDFLIB_SCRIPT = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+  const TESSERACT_SCRIPT = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+  const DEFAULT_GRID_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ".split("");
+  const OCR_MASK_SCALE = 2;
 
   const els = {
     pdfInput: document.querySelector("#pdfInput"),
@@ -18,6 +21,7 @@
     gridLetters: document.querySelector("#gridLetters"),
     gridNumbers: document.querySelector("#gridNumbers"),
     saveDrawingButton: document.querySelector("#saveDrawingButton"),
+    scanDrawingButton: document.querySelector("#scanDrawingButton"),
     exportCsvButton: document.querySelector("#exportCsvButton"),
     exportPdfButton: document.querySelector("#exportPdfButton"),
     clearDataButton: document.querySelector("#clearDataButton"),
@@ -49,6 +53,7 @@
   const state = loadAppState();
   let pdfJsPromise = null;
   let pdfLibPromise = null;
+  let tesseractPromise = null;
   let dbPromise = null;
 
   init();
@@ -60,6 +65,7 @@
     els.drawingSelect.addEventListener("change", handleDrawingChange);
     els.deleteDrawingButton.addEventListener("click", deleteActiveDrawing);
     els.saveDrawingButton.addEventListener("click", saveDrawingEdits);
+    els.scanDrawingButton.addEventListener("click", scanActiveDrawing);
     els.exportCsvButton.addEventListener("click", exportCsv);
     els.exportPdfButton.addEventListener("click", exportEmbeddedPdf);
     els.clearDataButton.addEventListener("click", clearAllData);
@@ -112,7 +118,7 @@
       return;
     }
 
-    showMessage(`Reading ${files.length} PDF file${files.length === 1 ? "" : "s"}...`);
+    showMessage(`Reading and scanning ${files.length} PDF file${files.length === 1 ? "" : "s"}...`);
     let imported = 0;
     let manualReview = false;
 
@@ -203,8 +209,19 @@
 
     const lines = buildTextLines(items);
     const metadata = extractMetadata(lines, fileName);
-    const gridModel = detectGridModel(items);
-    const piles = extractPileRows(items, gridModel);
+    const textGridModel = detectGridModel(items);
+    const textPiles = extractPileRows(items, textGridModel);
+    const visual = await extractVisualPlanInfo(pdf).catch(() => null);
+    const gridModel = visual?.gridModel?.letters?.length && visual?.gridModel?.numbers?.length ? visual.gridModel : textGridModel;
+    const visualPiles = visual?.piles || [];
+    const piles = visualPiles.length >= textPiles.length ? visualPiles : textPiles;
+    const noteParts = [];
+    if (visual?.note) {
+      noteParts.push(visual.note);
+    }
+    if (!piles.length) {
+      noteParts.push("No pile numbers were found automatically.");
+    }
 
     return {
       projectTitle: metadata.projectTitle,
@@ -213,7 +230,7 @@
       gridLetters: gridModel.letters.map((item) => item.label),
       gridNumbers: gridModel.numbers.map((item) => item.label),
       piles,
-      extractionNote: piles.length ? "" : "No pile-number text was found in the PDF text layer."
+      extractionNote: noteParts.join(" ")
     };
   }
 
@@ -227,6 +244,464 @@
       piles: [],
       extractionNote: "PDF text extraction was not available."
     };
+  }
+
+  async function extractVisualPlanInfo(pdf) {
+    const page = await pdf.getPage(1);
+    const canvas = await renderPdfPageToCanvas(page, 2);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const plan = detectVisualPlan(imageData);
+    const piles = plan.box ? await recognizeRedPileNumbers(canvas, imageData, plan) : [];
+    const noteParts = [];
+
+    if (!plan.redBox) {
+      noteParts.push("No red pile-number area was detected.");
+    }
+    if (!plan.gridModel.letters.length || !plan.gridModel.numbers.length) {
+      noteParts.push("X/Y grid axes were not detected from drawing lines.");
+    }
+    if (!piles.length) {
+      noteParts.push("Red pile-number OCR found no usable numbers.");
+    }
+
+    return {
+      gridModel: plan.gridModel,
+      piles,
+      note: noteParts.join(" ")
+    };
+  }
+
+  async function renderPdfPageToCanvas(page, scale) {
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    return canvas;
+  }
+
+  function detectVisualPlan(imageData) {
+    const { data, width, height } = imageData;
+    const redBox = findRedPlanBox(data, width, height);
+    const box = redBox
+      ? expandBox(redBox, Math.round(width * 0.075), Math.round(height * 0.085), width, height)
+      : {
+          x0: Math.round(width * 0.18),
+          y0: Math.round(height * 0.36),
+          x1: Math.round(width * 0.84),
+          y1: Math.round(height * 0.94)
+        };
+    const axes = detectVisualGridAxes(data, width, height, box, redBox);
+    const gridModel = {
+      letters: axes.vertical.map((axis, index) => ({ label: DEFAULT_GRID_LETTERS[index] || String(index + 1), x: axis.value, top: box.y0 })),
+      numbers: axes.horizontal.map((axis, index) => ({ label: String(index + 1), x: box.x0, top: axis.value }))
+    };
+    return { box, redBox, axes, gridModel };
+  }
+
+  function findRedPlanBox(data, width, height) {
+    let x0 = width;
+    let y0 = height;
+    let x1 = 0;
+    let y1 = 0;
+    let count = 0;
+    const minY = Math.round(height * 0.34);
+    const maxX = Math.round(width * 0.88);
+
+    for (let y = minY; y < height; y += 2) {
+      for (let x = 0; x < maxX; x += 2) {
+        const offset = (y * width + x) * 4;
+        if (!isRedPixel(data[offset], data[offset + 1], data[offset + 2], data[offset + 3])) {
+          continue;
+        }
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+        count += 1;
+      }
+    }
+
+    if (count < 120) {
+      return null;
+    }
+    return { x0, y0, x1, y1 };
+  }
+
+  function detectVisualGridAxes(data, width, height, box, redBox) {
+    const colProfile = new Int32Array(width);
+    const rowProfile = new Int32Array(height);
+    for (let y = box.y0; y <= box.y1; y += 1) {
+      for (let x = box.x0; x <= box.x1; x += 1) {
+        const offset = (y * width + x) * 4;
+        if (isGridLinePixel(data[offset], data[offset + 1], data[offset + 2], data[offset + 3])) {
+          colProfile[x] += 1;
+          rowProfile[y] += 1;
+        }
+      }
+    }
+
+    const boxHeight = Math.max(1, box.y1 - box.y0 + 1);
+    const boxWidth = Math.max(1, box.x1 - box.x0 + 1);
+    let vertical = profilePeaks(colProfile, box.x0, box.x1, boxHeight * 0.24);
+    let horizontal = profilePeaks(rowProfile, box.y0, box.y1, boxWidth * 0.14);
+
+    if (redBox) {
+      vertical = vertical.filter((peak) => peak.value >= redBox.x0 - width * 0.035 && peak.value <= redBox.x1 + width * 0.035);
+      horizontal = horizontal.filter((peak) => peak.value >= redBox.y0 - height * 0.075 && peak.value <= redBox.y1 + height * 0.06);
+    }
+
+    vertical = pruneClosePeaks(vertical, Math.max(8, width * 0.012));
+    horizontal = pruneClosePeaks(horizontal, Math.max(8, height * 0.01));
+    vertical = findRegularAxis(vertical, 5, width * 0.03, width * 0.16);
+
+    if (vertical.length) {
+      const axisHorizontal = horizontal.filter((peak) => hasLeftGridExtension(data, width, height, peak.value, vertical[0].value));
+      if (axisHorizontal.length >= 5) {
+        horizontal = axisHorizontal;
+      }
+    }
+
+    return {
+      vertical,
+      horizontal
+    };
+  }
+
+  function hasLeftGridExtension(data, width, height, y, firstVerticalX) {
+    const x0 = Math.max(0, Math.round(firstVerticalX - width * 0.075));
+    const x1 = Math.max(0, Math.round(firstVerticalX - width * 0.012));
+    const y0 = Math.max(0, y - 3);
+    const y1 = Math.min(height - 1, y + 3);
+    const requiredRun = Math.max(38, width * 0.025);
+
+    for (let row = y0; row <= y1; row += 1) {
+      let run = 0;
+      for (let x = x0; x <= x1; x += 1) {
+        const offset = (row * width + x) * 4;
+        if (isGridLinePixel(data[offset], data[offset + 1], data[offset + 2], data[offset + 3])) {
+          run += 1;
+          if (run >= requiredRun) {
+            return true;
+          }
+        } else {
+          run = 0;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function profilePeaks(profile, start, end, threshold) {
+    const peaks = [];
+    let groupStart = -1;
+    let score = 0;
+    let weighted = 0;
+
+    for (let index = start; index <= end; index += 1) {
+      const value = profile[index];
+      if (value >= threshold) {
+        if (groupStart < 0) {
+          groupStart = index;
+          score = 0;
+          weighted = 0;
+        }
+        score += value;
+        weighted += value * index;
+      }
+
+      if ((value < threshold || index === end) && groupStart >= 0) {
+        peaks.push({ value: Math.round(weighted / Math.max(score, 1)), score });
+        groupStart = -1;
+      }
+    }
+
+    return peaks;
+  }
+
+  function pruneClosePeaks(peaks, minGap) {
+    const sorted = [...peaks].sort((a, b) => a.value - b.value);
+    const pruned = [];
+    sorted.forEach((peak) => {
+      const last = pruned[pruned.length - 1];
+      if (last && peak.value - last.value < minGap) {
+        if (peak.score > last.score) {
+          pruned[pruned.length - 1] = peak;
+        }
+        return;
+      }
+      pruned.push(peak);
+    });
+    return pruned;
+  }
+
+  function findRegularAxis(peaks, minLength, minSpacing, maxSpacing) {
+    if (peaks.length < minLength) {
+      return peaks;
+    }
+
+    const sorted = [...peaks].sort((a, b) => a.value - b.value);
+    let best = [];
+    let bestScore = -Infinity;
+
+    for (let first = 0; first < sorted.length - 1; first += 1) {
+      for (let second = first + 1; second < sorted.length; second += 1) {
+        const spacing = sorted[second].value - sorted[first].value;
+        if (spacing < minSpacing || spacing > maxSpacing) {
+          continue;
+        }
+
+        const sequence = [sorted[first], sorted[second]];
+        let expected = sorted[second].value + spacing;
+        let error = 0;
+
+        for (let index = second + 1; index < sorted.length; index += 1) {
+          const tolerance = Math.max(10, spacing * 0.18);
+          if (Math.abs(sorted[index].value - expected) <= tolerance) {
+            sequence.push(sorted[index]);
+            error += Math.abs(sorted[index].value - expected);
+            expected += spacing;
+          } else if (sorted[index].value > expected + tolerance) {
+            expected += spacing;
+            index -= 1;
+          }
+        }
+
+        const score = sequence.length * 10000 - error - spacing * 0.02;
+        if (sequence.length >= minLength && score > bestScore) {
+          best = sequence;
+          bestScore = score;
+        }
+      }
+    }
+
+    return best.length ? best : sorted;
+  }
+
+  async function recognizeRedPileNumbers(sourceCanvas, sourceImageData, plan) {
+    const Tesseract = await ensureTesseract();
+    const mask = buildRedOcrCanvas(sourceImageData, plan.box);
+    const result = await Tesseract.recognize(mask.canvas, "eng", {
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: Tesseract.PSM?.SPARSE_TEXT || "11"
+    });
+    const words = result?.data?.words || [];
+    const piles = words
+      .map((word) => ocrWordToPile(word, mask, plan))
+      .filter(Boolean)
+      .filter((pile) => Number(pile.number) > 0 && Number(pile.number) < 10000);
+
+    return completeSequentialPiles(uniquePiles(piles), plan.gridModel).sort(sortPiles);
+  }
+
+  function completeSequentialPiles(piles, gridModel) {
+    const sequenceLimit = inferSequenceLimit(piles);
+    if (!sequenceLimit) {
+      return piles;
+    }
+
+    const byNumber = new Map();
+    piles.forEach((pile) => {
+      const value = Number(pile.number);
+      if (value >= 1 && value <= sequenceLimit) {
+        byNumber.set(value, pile);
+      }
+    });
+
+    const knownNumbers = [...byNumber.keys()].sort((a, b) => a - b);
+    for (let value = 1; value <= sequenceLimit; value += 1) {
+      if (byNumber.has(value)) {
+        continue;
+      }
+
+      const position = interpolatePilePosition(value, knownNumbers, byNumber);
+      byNumber.set(
+        value,
+        normalizePile({
+          number: String(value),
+          grid: position ? nearestGrid({ x: position.x, top: position.y }, gridModel) : "",
+          source: "sequence-fill",
+          x: position?.x || 0,
+          y: position?.y || 0
+        })
+      );
+    }
+
+    return [...byNumber.values()];
+  }
+
+  function inferSequenceLimit(piles) {
+    const numbers = uniqueNumericValues(piles.map((pile) => Number(pile.number))).filter((value) => value > 0);
+    if (numbers[0] !== 1 || numbers.length < 40) {
+      return 0;
+    }
+
+    let limit = 0;
+    numbers.forEach((value, index) => {
+      if (value < 50) {
+        return;
+      }
+      const coverage = (index + 1) / value;
+      const next = numbers[index + 1] || Infinity;
+      const gap = next - value;
+      if (coverage >= 0.55 && gap > Math.max(24, value * 0.22)) {
+        limit = value;
+      }
+    });
+
+    return limit;
+  }
+
+  function interpolatePilePosition(value, knownNumbers, byNumber) {
+    let lower = 0;
+    let upper = 0;
+    for (let index = 0; index < knownNumbers.length; index += 1) {
+      if (knownNumbers[index] < value) {
+        lower = knownNumbers[index];
+      }
+      if (knownNumbers[index] > value) {
+        upper = knownNumbers[index];
+        break;
+      }
+    }
+
+    const lowerPile = byNumber.get(lower);
+    const upperPile = byNumber.get(upper);
+    if (lowerPile && upperPile) {
+      const spanValue = upper - lower || 1;
+      const ratio = (value - lower) / spanValue;
+      return {
+        x: lowerPile.x + (upperPile.x - lowerPile.x) * ratio,
+        y: lowerPile.y + (upperPile.y - lowerPile.y) * ratio
+      };
+    }
+    if (lowerPile) {
+      return { x: lowerPile.x, y: lowerPile.y };
+    }
+    if (upperPile) {
+      return { x: upperPile.x, y: upperPile.y };
+    }
+    return null;
+  }
+
+  function buildRedOcrCanvas(sourceImageData, box) {
+    const padding = 12;
+    const sourceWidth = box.x1 - box.x0 + 1 + padding * 2;
+    const sourceHeight = box.y1 - box.y0 + 1 + padding * 2;
+    const width = sourceWidth * OCR_MASK_SCALE;
+    const height = sourceHeight * OCR_MASK_SCALE;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    const output = context.createImageData(width, height);
+    output.data.fill(255);
+
+    for (let y = 0; y < sourceHeight; y += 1) {
+      for (let x = 0; x < sourceWidth; x += 1) {
+        const sourceX = box.x0 + x - padding;
+        const sourceY = box.y0 + y - padding;
+
+        if (sourceX < 0 || sourceY < 0 || sourceX >= sourceImageData.width || sourceY >= sourceImageData.height) {
+          continue;
+        }
+
+        const sourceOffset = (sourceY * sourceImageData.width + sourceX) * 4;
+        if (isRedPixel(sourceImageData.data[sourceOffset], sourceImageData.data[sourceOffset + 1], sourceImageData.data[sourceOffset + 2], sourceImageData.data[sourceOffset + 3])) {
+          paintScaledMaskPixel(output.data, width, x, y);
+        }
+      }
+    }
+
+    context.putImageData(output, 0, 0);
+    return { canvas, padding, scale: OCR_MASK_SCALE };
+  }
+
+  function paintScaledMaskPixel(data, width, sourceX, sourceY) {
+    const scaledX = sourceX * OCR_MASK_SCALE;
+    const scaledY = sourceY * OCR_MASK_SCALE;
+    for (let y = scaledY; y < scaledY + OCR_MASK_SCALE; y += 1) {
+      for (let x = scaledX; x < scaledX + OCR_MASK_SCALE; x += 1) {
+        const offset = (y * width + x) * 4;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+        data[offset + 3] = 255;
+      }
+    }
+  }
+
+  function ocrWordToPile(word, mask, plan) {
+    const text = cleanText(word.text).replace(/\D/g, "");
+    if (!text) {
+      return null;
+    }
+    const bbox = word.bbox || {};
+    const centerX = plan.box.x0 + (((bbox.x0 || 0) + (bbox.x1 || 0)) / 2) / mask.scale - mask.padding;
+    const centerY = plan.box.y0 + (((bbox.y0 || 0) + (bbox.y1 || 0)) / 2) / mask.scale - mask.padding;
+
+    return normalizePile({
+      number: String(Number(text)),
+      grid: nearestGrid({ x: centerX, top: centerY }, plan.gridModel),
+      source: "red-ocr",
+      x: centerX,
+      y: centerY
+    });
+  }
+
+  function isRedPixel(r, g, b, a) {
+    return a > 40 && r > 125 && r - g > 35 && r - b > 35 && r > g * 1.18 && r > b * 1.18;
+  }
+
+  function isGridLinePixel(r, g, b, a) {
+    if (a <= 40 || isRedPixel(r, g, b, a)) {
+      return false;
+    }
+    const brightness = (r + g + b) / 3;
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    return brightness < 185 && spread < 85;
+  }
+
+  function expandBox(box, xMargin, yMargin, width, height) {
+    return {
+      x0: Math.max(0, Math.round(box.x0 - xMargin)),
+      y0: Math.max(0, Math.round(box.y0 - yMargin)),
+      x1: Math.min(width - 1, Math.round(box.x1 + xMargin)),
+      y1: Math.min(height - 1, Math.round(box.y1 + yMargin))
+    };
+  }
+
+  async function scanActiveDrawing() {
+    const drawing = getActiveDrawing();
+    if (!drawing) {
+      showMessage("Upload a PDF first.", true);
+      return;
+    }
+
+    showMessage("Scanning red pile numbers and X/Y grid lines...");
+    try {
+      const bytes = await readPdfBytes(drawing.id);
+      if (!bytes) {
+        showMessage("Original PDF is not stored on this device. Re-upload it before scanning.", true);
+        return;
+      }
+
+      const extracted = await extractPdfInfo(bytes.slice(0), drawing.fileName);
+      drawing.projectTitle = extracted.projectTitle || drawing.projectTitle;
+      drawing.drawingTitle = extracted.drawingTitle || drawing.drawingTitle;
+      drawing.gridLetters = extracted.gridLetters.length ? extracted.gridLetters : drawing.gridLetters;
+      drawing.gridNumbers = extracted.gridNumbers.length ? extracted.gridNumbers : drawing.gridNumbers;
+      drawing.piles = uniquePiles([...extracted.piles, ...drawing.piles]).sort(sortPiles);
+      drawing.extractionNote = extracted.extractionNote || "";
+      drawing.updatedAt = Date.now();
+      persist();
+      render();
+      showMessage(`${extracted.piles.length} pile number${extracted.piles.length === 1 ? "" : "s"} found from the red drawing labels.`);
+    } catch (error) {
+      showMessage("Red number scan failed. Try re-uploading a clearer PDF.", true);
+    }
   }
 
   function buildTextLines(items) {
@@ -868,6 +1343,7 @@
       els.gridLetters,
       els.gridNumbers,
       els.saveDrawingButton,
+      els.scanDrawingButton,
       els.exportCsvButton,
       els.exportPdfButton,
       els.gridSelect,
@@ -1189,6 +1665,16 @@
     return pdfLibPromise;
   }
 
+  async function ensureTesseract() {
+    if (window.Tesseract) {
+      return window.Tesseract;
+    }
+    if (!tesseractPromise) {
+      tesseractPromise = loadScript(TESSERACT_SCRIPT).then(() => window.Tesseract);
+    }
+    return tesseractPromise;
+  }
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(`script[src="${src}"]`);
@@ -1256,7 +1742,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.0").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.1").catch(() => {});
     }
   }
 
@@ -1304,6 +1790,10 @@
 
   function uniqueStrings(values) {
     return [...new Set(values.map(cleanText).filter(Boolean))];
+  }
+
+  function uniqueNumericValues(values) {
+    return [...new Set(values.filter((value) => Number.isFinite(value)).map((value) => Math.round(value)))].sort((a, b) => a - b);
   }
 
   function longestConsecutiveRun(values) {

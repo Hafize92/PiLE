@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.0`
+Ver `1.0.1`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -8,7 +8,7 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 
 - Uploaded PDF drawing metadata
 - Project title and drawing title extracted from the PDF text layer where available
-- Grid letters and grid numbers as separate editable lists
+- X/Y grid letters and numbers detected from drawing grid lines where available
 - Pile numbers / points with an editable grid dropdown
 - Piling date
 - Penetration depth
@@ -18,11 +18,23 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 
 1. Upload one or more PDF drawings.
 2. Review the extracted project title, drawing title, grid, and pile register.
-3. If pile numbers are not readable from the PDF text layer, add them with the range tool, for example `1` to `464`.
+3. The app scans the rendered drawing for red pile-number labels and X/Y grid axes.
 4. Record piling date and penetration depth against each pile number / grid.
 5. Export CSV or a PDF output based on the original uploaded PDF.
 
 The exported PDF keeps the original drawing and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
+
+## Visual Extraction
+
+The app uses PDF.js to render page 1 of the drawing in the browser, then:
+
+- Detects the main plan area from red drawing marks.
+- Detects X-axis grid lines and labels them `A, B, C...`, skipping `I`.
+- Detects Y-axis grid lines from the left-side grid extension and labels them `1, 2, 3...`.
+- Runs digit-only OCR on the red pile-number labels.
+- When a dense sequence such as `1..464` is detected, drops OCR outliers and fills missed sequence numbers by interpolating from nearby detected labels.
+
+All extracted pile numbers and grids remain editable in the review table.
 
 ## Local Data
 
