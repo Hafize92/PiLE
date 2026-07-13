@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.8";
+  const APP_VERSION = "1.0.9";
   const APP_NAME = "AKZ Piling Record";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
@@ -71,6 +71,7 @@
   let remarkingPile = null;
   let pendingZoomAnchor = null;
   let pinchZoomState = null;
+  let touchPanState = null;
 
   init();
 
@@ -98,9 +99,10 @@
     els.pileHistory.addEventListener("click", handleStatusClick);
     els.livePdfCanvas.addEventListener("click", handleLivePreviewClick);
     els.livePdfViewport.addEventListener("wheel", handleLivePreviewWheel, { passive: false });
-    els.livePdfViewport.addEventListener("touchstart", handleLivePreviewTouchStart, { passive: true });
+    els.livePdfViewport.addEventListener("touchstart", handleLivePreviewTouchStart, { passive: false });
     els.livePdfViewport.addEventListener("touchmove", handleLivePreviewTouchMove, { passive: false });
     els.livePdfViewport.addEventListener("touchend", handleLivePreviewTouchEnd, { passive: true });
+    els.livePdfViewport.addEventListener("touchcancel", handleLivePreviewTouchEnd, { passive: true });
     els.zoomOutButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom / 1.2, viewerCenterAnchor()));
     els.zoomResetButton.addEventListener("click", () => setLivePdfZoom(1, viewerCenterAnchor()));
     els.zoomInButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom * 1.2, viewerCenterAnchor()));
@@ -1961,9 +1963,12 @@
     const page = await pdf.getPage(1);
     const baseViewport = page.getViewport({ scale: 1 });
     const container = els.livePdfCanvas.parentElement;
-    const availableWidth = Math.max(320, container.clientWidth - 24);
-    const fitScale = clamp(availableWidth / baseViewport.width, 0.35, 2.4);
-    const scale = clamp(fitScale * livePdfZoom, 0.25, 4);
+    const compactPreview = window.matchMedia("(max-width: 680px)").matches;
+    const panelWidth = usablePreviewPanelWidth();
+    const measuredWidth = container.clientWidth || panelWidth || window.innerWidth;
+    const availableWidth = Math.max(compactPreview ? 220 : 320, measuredWidth - (compactPreview ? 10 : 24));
+    const fitScale = clamp(availableWidth / baseViewport.width, compactPreview ? 0.06 : 0.2, 2.4);
+    const scale = clamp(fitScale * livePdfZoom, compactPreview ? 0.06 : 0.25, 4);
     const viewport = page.getViewport({ scale });
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const canvas = document.createElement("canvas");
@@ -1987,6 +1992,16 @@
     };
     await pdf.destroy?.();
     return canvas;
+  }
+
+  function usablePreviewPanelWidth() {
+    const panel = document.querySelector(".pdf-preview-panel");
+    if (!panel) {
+      return 0;
+    }
+    const style = window.getComputedStyle(panel);
+    const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    return Math.max(0, panel.clientWidth - padding);
   }
 
   function showLivePreviewCanvas(previewCanvas) {
@@ -2041,32 +2056,58 @@
   }
 
   function handleLivePreviewTouchStart(event) {
-    if (event.touches.length !== 2 || !livePreviewInfo) {
+    if (!livePreviewInfo) {
       pinchZoomState = null;
+      touchPanState = null;
       return;
     }
-    pinchZoomState = {
-      distance: touchDistance(event.touches),
-      zoom: livePdfZoom
-    };
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      pinchZoomState = {
+        distance: touchDistance(event.touches),
+        zoom: livePdfZoom
+      };
+      touchPanState = null;
+      return;
+    }
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      touchPanState = {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        scrollLeft: els.livePdfViewport.scrollLeft,
+        scrollTop: els.livePdfViewport.scrollTop
+      };
+    }
   }
 
   function handleLivePreviewTouchMove(event) {
-    if (!pinchZoomState || event.touches.length !== 2) {
+    if (pinchZoomState && event.touches.length === 2) {
+      event.preventDefault();
+      const distance = touchDistance(event.touches);
+      if (pinchZoomState.distance <= 0 || distance <= 0) {
+        return;
+      }
+      const center = touchCenter(event.touches);
+      setLivePdfZoom(pinchZoomState.zoom * (distance / pinchZoomState.distance), center, 70);
+      return;
+    }
+
+    if (!touchPanState || event.touches.length !== 1) {
       return;
     }
     event.preventDefault();
-    const distance = touchDistance(event.touches);
-    if (pinchZoomState.distance <= 0 || distance <= 0) {
-      return;
-    }
-    const center = touchCenter(event.touches);
-    setLivePdfZoom(pinchZoomState.zoom * (distance / pinchZoomState.distance), center, 70);
+    const touch = event.touches[0];
+    els.livePdfViewport.scrollLeft = touchPanState.scrollLeft + touchPanState.clientX - touch.clientX;
+    els.livePdfViewport.scrollTop = touchPanState.scrollTop + touchPanState.clientY - touch.clientY;
   }
 
   function handleLivePreviewTouchEnd(event) {
     if (event.touches.length < 2) {
       pinchZoomState = null;
+    }
+    if (event.touches.length === 0) {
+      touchPanState = null;
     }
   }
 
@@ -2732,7 +2773,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.8").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.9").catch(() => {});
     }
   }
 

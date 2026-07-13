@@ -1,6 +1,6 @@
 # AKZ Piling Record
 
-Ver `1.0.8`
+Ver `1.0.9`
 
 AKZ Piling Record is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -25,7 +25,7 @@ AKZ Piling Record is a local-first web app/PWA for tracking piling progress from
 
 Recorded piles are removed from the Daily input dropdowns so users do not accidentally enter the same pile twice. The pile register shows recorded piles only. Clearing a pile record from the pile register returns that pile to Daily input.
 
-The live PDF preview renders the marked uploaded drawing page directly in the app, with zoom in, zoom out, reset, Ctrl/trackpad wheel zoom, and two-finger pinch zoom on phones. The exported PDF keeps the original drawing, writes saved pile/date/depth notes in blue beside the recorded pile locations, and appends AKZ Piling Record summary pages with the latest pile records. A small status stamp is added to the original drawing page.
+The live PDF preview renders the marked uploaded drawing page directly in the app. On phones, the preview starts fitted to the available width, then zoom in, zoom out, reset, Ctrl/trackpad wheel zoom, one-finger pan, and two-finger pinch zoom stay inside the PDF preview so the page width does not change. The exported PDF keeps the original drawing, writes saved pile/date/depth notes in blue beside the recorded pile locations, and appends AKZ Piling Record summary pages with the latest pile records. A small status stamp is added to the original drawing page.
 
 ## Visual Extraction
 
@@ -64,7 +64,7 @@ Records are stored locally in the user's browser. The same link opened in anothe
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.8`
+- Minor revision: `Ver1.0.9`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.

@@ -22,12 +22,16 @@
 
 html {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
 }
 
 body {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   margin: 0;
 }
 
@@ -52,6 +56,8 @@ textarea:disabled {
 
 .app-shell {
   width: min(1220px, 100%);
+  max-width: 100%;
+  overflow-x: clip;
   margin: 0 auto;
   padding: max(18px, env(safe-area-inset-top)) 16px max(38px, env(safe-area-inset-bottom));
 }
@@ -144,6 +150,8 @@ textarea:disabled {
 .register-panel,
 .pdf-preview-panel,
 .stats-panel {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
@@ -201,14 +209,19 @@ textarea:disabled {
 
 .pdf-preview-panel {
   grid-area: preview;
+  overflow: hidden;
   padding: 16px;
 }
 
 .live-preview-viewport {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: min(58vh, 520px);
   overflow: auto;
   overscroll-behavior: contain;
+  contain: layout paint;
+  touch-action: none;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -230,8 +243,12 @@ textarea:disabled {
 
 #livePdfCanvas {
   display: block;
+  max-width: none;
   margin: 0 auto;
   background: #fff;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .preview-tools,
@@ -713,7 +730,7 @@ textarea:focus {
   }
 
   .live-preview-viewport {
-    height: 430px;
+    height: min(42vh, 340px);
   }
 
   .stats-panel {
