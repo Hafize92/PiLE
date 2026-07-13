@@ -133,6 +133,7 @@ textarea:disabled {
   grid-template-areas:
     "upload upload"
     "stats stats"
+    "preview preview"
     "entry register";
   gap: 14px;
   align-items: start;
@@ -141,6 +142,7 @@ textarea:disabled {
 .upload-panel,
 .entry-panel,
 .register-panel,
+.pdf-preview-panel,
 .stats-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -195,6 +197,26 @@ textarea:disabled {
   grid-area: register;
   min-width: 0;
   padding: 16px;
+}
+
+.pdf-preview-panel {
+  grid-area: preview;
+  padding: 16px;
+}
+
+.preview-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+#livePdfFrame {
+  width: 100%;
+  height: min(58vh, 520px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
 }
 
 .panel-head,
@@ -591,6 +613,7 @@ textarea:focus {
     grid-template-areas:
       "upload"
       "stats"
+      "preview"
       "entry"
       "register";
   }
@@ -625,8 +648,13 @@ textarea:focus {
 
   .upload-panel,
   .entry-panel,
+  .pdf-preview-panel,
   .register-panel {
     padding: 13px;
+  }
+
+  #livePdfFrame {
+    height: 430px;
   }
 
   .stats-panel {

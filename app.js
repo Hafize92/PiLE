@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.4";
+  const APP_VERSION = "1.0.5";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -48,19 +48,26 @@
     addRangeButton: document.querySelector("#addRangeButton"),
     statusBody: document.querySelector("#statusBody"),
     emptyState: document.querySelector("#emptyState"),
+    livePdfFrame: document.querySelector("#livePdfFrame"),
+    livePdfStatus: document.querySelector("#livePdfStatus"),
     storageStatus: document.querySelector("#storageStatus")
   };
 
   const state = loadAppState();
+  let stateRepairedOnLoad = false;
   let pdfJsPromise = null;
   let pdfLibPromise = null;
   let tesseractPromise = null;
   let dbPromise = null;
+  let livePdfPreviewUrl = "";
+  let livePdfPreviewTimer = 0;
+  let livePdfPreviewGeneration = 0;
 
   init();
 
   function init() {
     els.pilingDate.value = todayInputValue();
+    stateRepairedOnLoad = repairLoadedDrawings();
 
     els.pdfInput.addEventListener("change", handlePdfUpload);
     els.drawingSelect.addEventListener("change", handleDrawingChange);
@@ -82,7 +89,13 @@
     els.statusBody.addEventListener("change", handleStatusChange);
     els.pileHistory.addEventListener("click", handleStatusClick);
 
+    if (stateRepairedOnLoad) {
+      persist();
+    }
     render();
+    if (stateRepairedOnLoad) {
+      showMessage("Stored pile register repaired with the latest extraction rules.");
+    }
     registerServiceWorker();
   }
 
@@ -90,6 +103,16 @@
     renderGridSelects();
     renderPileSelect();
     renderHistory();
+  }
+
+  function repairLoadedDrawings() {
+    let changed = false;
+    state.drawings.forEach((drawing) => {
+      if (repairDrawingPileSequence(drawing)) {
+        changed = true;
+      }
+    });
+    return changed;
   }
 
   function loadAppState() {
@@ -563,9 +586,62 @@
     return current;
   }
 
+  function repairDrawingPileSequence(drawing) {
+    if (!drawing || !Array.isArray(drawing.piles) || drawing.piles.length < 40) {
+      return false;
+    }
+
+    const sequenceLimit = inferSequenceLimit(drawing.piles);
+    if (!sequenceLimit) {
+      return false;
+    }
+
+    const sequencePiles = drawing.piles.filter((pile) => {
+      const value = Number(pile.number);
+      return Number.isInteger(value) && value >= 1 && value <= sequenceLimit;
+    });
+    const otherPiles = drawing.piles.filter((pile) => !sequencePiles.includes(pile));
+    const before = pileRepairSignature(sequencePiles);
+    const cleaned = pruneSequenceOutlierPiles(sequencePiles, sequenceLimit);
+    const gridModel = gridModelFromDrawingPiles(drawing, cleaned);
+    const repaired = completeSequentialPiles(cleaned, gridModel, sequenceLimit).sort(sortPiles);
+    const after = pileRepairSignature(repaired);
+
+    if (before === after) {
+      return false;
+    }
+
+    drawing.piles = uniquePiles([...repaired, ...otherPiles]).sort(sortPiles);
+    drawing.updatedAt = Date.now();
+    return true;
+  }
+
+  function pileRepairSignature(piles) {
+    return piles
+      .map((pile) => [pile.number, pile.grid, Math.round(Number(pile.x) || 0), Math.round(Number(pile.y) || 0), pile.source].join(":"))
+      .join("|");
+  }
+
+  function gridModelFromDrawingPiles(drawing, piles) {
+    const letters = drawing.gridLetters
+      .map((label) => {
+        const xs = piles.filter((pile) => splitGrid(pile.grid).x === label && Number(pile.x) > 0).map((pile) => Number(pile.x));
+        return xs.length ? { label, x: median(xs), top: 0 } : null;
+      })
+      .filter(Boolean);
+    const numbers = drawing.gridNumbers
+      .map((label) => {
+        const ys = piles.filter((pile) => splitGrid(pile.grid).y === label && Number(pile.y) > 0).map((pile) => Number(pile.y));
+        return ys.length ? { label, x: 0, top: median(ys) } : null;
+      })
+      .filter(Boolean);
+
+    return { letters, numbers };
+  }
+
   function isSequenceGridOutlier(pile, byNumber, sequenceLimit) {
     const value = Number(pile.number);
-    if (!Number.isInteger(value) || value < 1 || value > sequenceLimit || pile.source !== "red-ocr") {
+    if (!Number.isInteger(value) || value < 1 || value > sequenceLimit || !/red-ocr|sequence-fill/.test(pile.source)) {
       return false;
     }
 
@@ -1479,6 +1555,7 @@
     renderStatusTable();
     renderHistory();
     updateControlStates();
+    scheduleLivePdfPreview();
   }
 
   function ensureActiveDrawing() {
@@ -1575,6 +1652,9 @@
       ? drawing.piles
           .filter((pile) => {
             const latest = getLatestRecord(drawing.id, pile.number);
+            if (!latest) {
+              return false;
+            }
             const haystack = [pile.number, pile.grid, latest?.date, latest?.penetrationDepth, latest?.remarks].join(" ").toLowerCase();
             return !search || haystack.includes(search);
           })
@@ -1582,7 +1662,7 @@
       : [];
 
     els.emptyState.classList.toggle("show", !drawing || !piles.length);
-    els.emptyState.querySelector("p").textContent = drawing ? "No piles match the current search." : "No drawing loaded.";
+    els.emptyState.querySelector("p").textContent = drawing ? "No registered piles match the current search." : "No drawing loaded.";
     els.statusBody.innerHTML = piles.map((pile) => renderPileRow(drawing, pile, gridOptions)).join("");
   }
 
@@ -1712,33 +1792,86 @@
 
     showMessage("Preparing PDF output...");
     try {
-      const originalBytes = await readPdfBytes(drawing.id);
-      if (!originalBytes) {
-        showMessage("Original PDF is not stored on this device. Re-upload it before exporting.", true);
-        return;
-      }
-
-      const PDFLib = await ensurePdfLib();
-      const pdfDoc = await PDFLib.PDFDocument.load(originalBytes, { ignoreEncryption: true });
-      const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
-      const bold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
-      const pages = pdfDoc.getPages();
-      const summaryRows = buildSummaryRows(drawing);
-      const recorded = summaryRows.filter((row) => row.status === "Recorded").length;
-
-      pdfDoc.setTitle(`${drawing.drawingTitle || drawing.fileName} - AkZ Piling Status`);
-      pdfDoc.setSubject(`AkZ Piling Status Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
-      pdfDoc.setKeywords(["AkZ Piling Status", `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
-      stampOriginalPdfPage(PDFLib, pages[0], font, drawing, recorded, summaryRows.length);
-      annotatePileRecordsOnOriginalPage(PDFLib, pages[0], font, drawing);
-      appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
-
-      const outputBytes = await pdfDoc.save({ useObjectStreams: false });
-      downloadBlob(new Blob([outputBytes], { type: "application/pdf" }), `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-status.pdf`);
+      const blob = await buildStatusPdfBlob(drawing);
+      downloadBlob(blob, `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-status.pdf`);
       showMessage("PDF output exported.");
     } catch (error) {
-      showMessage("PDF output failed. Check the PDF and try again.", true);
+      showMessage(error.message === "missing-original-pdf" ? "Original PDF is not stored on this device. Re-upload it before exporting." : "PDF output failed. Check the PDF and try again.", true);
     }
+  }
+
+  async function buildStatusPdfBlob(drawing) {
+    const outputBytes = await buildStatusPdfBytes(drawing);
+    return new Blob([outputBytes], { type: "application/pdf" });
+  }
+
+  async function buildStatusPdfBytes(drawing) {
+    const originalBytes = await readPdfBytes(drawing.id);
+    if (!originalBytes) {
+      throw new Error("missing-original-pdf");
+    }
+
+    const PDFLib = await ensurePdfLib();
+    const pdfDoc = await PDFLib.PDFDocument.load(originalBytes, { ignoreEncryption: true });
+    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const bold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+    const pages = pdfDoc.getPages();
+    const summaryRows = buildSummaryRows(drawing);
+    const recorded = summaryRows.filter((row) => row.status === "Recorded").length;
+
+    pdfDoc.setTitle(`${drawing.drawingTitle || drawing.fileName} - AkZ Piling Status`);
+    pdfDoc.setSubject(`AkZ Piling Status Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
+    pdfDoc.setKeywords(["AkZ Piling Status", `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
+    stampOriginalPdfPage(PDFLib, pages[0], font, drawing, recorded, summaryRows.length);
+    annotatePileRecordsOnOriginalPage(PDFLib, pages[0], font, drawing);
+    appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
+
+    return pdfDoc.save({ useObjectStreams: false });
+  }
+
+  function scheduleLivePdfPreview() {
+    window.clearTimeout(livePdfPreviewTimer);
+    livePdfPreviewTimer = window.setTimeout(refreshLivePdfPreview, 450);
+  }
+
+  async function refreshLivePdfPreview() {
+    const drawing = getActiveDrawing();
+    const generation = (livePdfPreviewGeneration += 1);
+
+    if (!drawing) {
+      clearLivePdfPreview("Upload a PDF to preview.");
+      return;
+    }
+
+    els.livePdfStatus.textContent = "Updating live PDF...";
+    try {
+      const blob = await buildStatusPdfBlob(drawing);
+      if (generation !== livePdfPreviewGeneration) {
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      if (livePdfPreviewUrl) {
+        URL.revokeObjectURL(livePdfPreviewUrl);
+      }
+      livePdfPreviewUrl = url;
+      els.livePdfFrame.src = url;
+      const recorded = drawing.piles.filter((pile) => getLatestRecord(drawing.id, pile.number)).length;
+      els.livePdfStatus.textContent = `${recorded} registered pile${recorded === 1 ? "" : "s"} shown`;
+    } catch (error) {
+      if (generation !== livePdfPreviewGeneration) {
+        return;
+      }
+      clearLivePdfPreview(error.message === "missing-original-pdf" ? "Re-upload the original PDF for live preview." : "Live PDF preview failed.");
+    }
+  }
+
+  function clearLivePdfPreview(message) {
+    if (livePdfPreviewUrl) {
+      URL.revokeObjectURL(livePdfPreviewUrl);
+      livePdfPreviewUrl = "";
+    }
+    els.livePdfFrame.removeAttribute("src");
+    els.livePdfStatus.textContent = message;
   }
 
   function buildSummaryRows(drawing) {
@@ -1807,7 +1940,7 @@
           pile,
           latest,
           point,
-          text: `${shortDate(latest.date)} ${formatDepthMeters(latest.penetrationDepth)}`
+          lines: [`(${shortDate(latest.date)}, ${formatDepthMeters(latest.penetrationDepth)})`, `(${pile.number})`]
         };
       })
       .filter(Boolean)
@@ -1824,69 +1957,20 @@
     const textRotation = PDFLib.degrees(displayTextRotation(geometry.rotation));
 
     annotated.forEach((item) => {
-      const textWidth = Math.max(font.widthOfTextAtSize(item.text, fontSize), 18);
-      const label = placeAnnotationLabel(item.point, textWidth, lineHeight, geometry.display, occupied, pileKeepouts);
+      const textWidth = Math.max(...item.lines.map((line) => font.widthOfTextAtSize(line, fontSize)), 18);
+      const textHeight = lineHeight * item.lines.length;
+      const label = placeAnnotationLabel(item.point, textWidth, textHeight, geometry.display, occupied, pileKeepouts);
       occupied.push(label.rect);
 
-      drawDisplayArrowToPile(page, geometry, { x: label.anchorX, y: label.anchorY }, item.point, blue);
-      page.drawCircle({
-        ...displayToPdfPoint(item.point, geometry),
-        size: Math.max(1.1, fontSize * 0.22),
-        color: blue,
-        opacity: 0.9
-      });
       [
         [-0.65, 0],
         [0.65, 0],
         [0, -0.65],
         [0, 0.65]
       ].forEach(([offsetX, offsetY]) => {
-        drawDisplayText(page, geometry, item.text, label.x + offsetX, label.y + offsetY, fontSize, font, PDFLib.rgb(1, 1, 1), 0.9, textRotation);
+        drawDisplayTextLines(page, geometry, item.lines, label.x + offsetX, label.y + offsetY, lineHeight, fontSize, font, PDFLib.rgb(1, 1, 1), 0.9, textRotation);
       });
-      drawDisplayText(page, geometry, item.text, label.x, label.y, fontSize, font, blue, 0.96, textRotation);
-    });
-  }
-
-  function drawDisplayArrowToPile(page, geometry, start, end, color) {
-    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-    if (distance < 0.1) {
-      return;
-    }
-
-    const unitX = (end.x - start.x) / distance;
-    const unitY = (end.y - start.y) / distance;
-    const arrowLength = 5.5;
-    const arrowWidth = 3.2;
-    const lineEnd = {
-      x: end.x - unitX * 1.4,
-      y: end.y - unitY * 1.4
-    };
-    const base = {
-      x: end.x - unitX * arrowLength,
-      y: end.y - unitY * arrowLength
-    };
-    const normal = { x: -unitY, y: unitX };
-    const left = {
-      x: base.x + normal.x * arrowWidth,
-      y: base.y + normal.y * arrowWidth
-    };
-    const right = {
-      x: base.x - normal.x * arrowWidth,
-      y: base.y - normal.y * arrowWidth
-    };
-
-    drawDisplayLine(page, geometry, start, lineEnd, color, 0.48, 0.84);
-    drawDisplayLine(page, geometry, left, end, color, 0.48, 0.9);
-    drawDisplayLine(page, geometry, right, end, color, 0.48, 0.9);
-  }
-
-  function drawDisplayLine(page, geometry, start, end, color, thickness, opacity) {
-    page.drawLine({
-      start: displayToPdfPoint(start, geometry),
-      end: displayToPdfPoint(end, geometry),
-      thickness,
-      color,
-      opacity
+      drawDisplayTextLines(page, geometry, item.lines, label.x, label.y, lineHeight, fontSize, font, blue, 0.96, textRotation);
     });
   }
 
@@ -1900,6 +1984,13 @@
       color,
       opacity,
       rotate
+    });
+  }
+
+  function drawDisplayTextLines(page, geometry, lines, x, y, lineHeight, size, font, color, opacity, rotate) {
+    lines.forEach((line, index) => {
+      const lineY = y + lineHeight * (lines.length - index - 1);
+      drawDisplayText(page, geometry, line, x, lineY, size, font, color, opacity, rotate);
     });
   }
 
@@ -2012,10 +2103,10 @@
 
   function pileAnnotationKeepout(point) {
     return {
-      x0: point.x - 34,
-      y0: point.y - 22,
-      x1: point.x + 34,
-      y1: point.y + 22
+      x0: point.x - 18,
+      y0: point.y - 12,
+      x1: point.x + 18,
+      y1: point.y + 12
     };
   }
 
@@ -2049,7 +2140,7 @@
 
   function annotationCandidates(point, width, height) {
     const candidates = [];
-    [28, 46, 70, 100, 138, 180].forEach((gap) => {
+    [8, 16, 28, 42, 60, 82].forEach((gap) => {
       candidates.push({ x: point.x + gap, y: point.y + gap * 0.25 });
       candidates.push({ x: point.x - width - gap, y: point.y + gap * 0.25 });
       candidates.push({ x: point.x + gap, y: point.y - height - gap * 0.25 });
@@ -2392,7 +2483,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.4").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.5").catch(() => {});
     }
   }
 

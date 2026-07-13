@@ -7,8 +7,8 @@
     <title>AkZ Piling Status</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=1.0.4">
-    <script defer src="app.js?v=1.0.4"></script>
+    <link rel="stylesheet" href="styles.css?v=1.0.5">
+    <script defer src="app.js?v=1.0.5"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -96,6 +96,17 @@
           </div>
         </section>
 
+        <section class="pdf-preview-panel" aria-labelledby="pdfPreviewTitle">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Live PDF</p>
+              <h2 id="pdfPreviewTitle">Marked drawing preview</h2>
+            </div>
+            <span class="preview-status" id="livePdfStatus">Upload a PDF to preview.</span>
+          </div>
+          <iframe id="livePdfFrame" title="Live marked PDF preview"></iframe>
+        </section>
+
         <section class="entry-panel" aria-labelledby="entryTitle">
           <div class="panel-head">
             <div>
@@ -124,8 +135,8 @@
                 <input id="pilingDate" type="date" required>
               </label>
               <label>
-                <span>Penetration depth</span>
-                <input id="penetrationDepth" inputmode="decimal" required placeholder="Depth">
+                <span>Penetration depth (m)</span>
+                <input id="penetrationDepth" inputmode="decimal" required placeholder="Depth in m">
               </label>
               <label class="span-2">
                 <span>Remarks</span>
@@ -148,10 +159,10 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Review</p>
-              <h2 id="registerTitle">Pile register</h2>
+              <h2 id="registerTitle">Registered piles</h2>
             </div>
             <div class="register-tools">
-              <input id="pileSearch" class="search-input" placeholder="Search pile or grid">
+              <input id="pileSearch" class="search-input" placeholder="Search registered pile">
               <button class="secondary-button compact-button" type="button" id="addPileButton">Add pile</button>
             </div>
           </div>
@@ -200,6 +211,6 @@
       </main>
     </div>
 
-    <div class="app-version">Ver1.0.4</div>
+    <div class="app-version">Ver1.0.5</div>
   </body>
 </html>

@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.4`
+Ver `1.0.5`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -23,9 +23,9 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 5. Record piling date and penetration depth against each pending pile number / grid.
 6. Export CSV or a PDF output based on the original uploaded PDF.
 
-Recorded piles are removed from the Daily input dropdowns so users do not accidentally enter the same pile twice. Clearing a pile record from the pile register returns that pile to Daily input.
+Recorded piles are removed from the Daily input dropdowns so users do not accidentally enter the same pile twice. The pile register shows recorded piles only. Clearing a pile record from the pile register returns that pile to Daily input.
 
-The exported PDF keeps the original drawing, writes saved piling date/depth notes in blue near the recorded pile locations, and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
+The live PDF preview and exported PDF keep the original drawing, write saved pile/date/depth notes in blue near the recorded pile locations, and append AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
 
 ## Visual Extraction
 
@@ -36,18 +36,18 @@ The app uses PDF.js to render page 1 of the drawing in the browser, then:
 - Detects Y-axis grid lines from the left-side grid extension and labels them `1, 2, 3...`.
 - Runs digit-only OCR on the red pile-number labels.
 - When a dense sequence such as `1..464` is detected, drops OCR outliers and fills missed sequence numbers by interpolating from nearby detected labels.
-- Rejects sequence outliers where a red OCR result lands on the wrong grid row, such as low pile numbers misread from the 400-series area.
+- Repairs stored and newly scanned sequence outliers where OCR or filled numbers land on the wrong pile group, such as low pile numbers misread from the 400-series area.
 
-All extracted pile numbers and grids remain editable in the review table.
+All extracted pile numbers and grids remain editable before recording through the Daily input choices and drawing controls.
 
 ## PDF Markups
 
-When exporting PDF after saving progress records:
+When saving progress records or exporting PDF:
 
-- Each recorded pile with a detected drawing coordinate gets a compact blue note beside the pile point.
-- The note uses `D/M/YY depth`, for example `12/7/26 18.2m`.
+- Each recorded pile with a detected drawing coordinate gets a compact blue pile/date/depth note beside the pile point.
+- The note uses pile number plus `D/M/YY, depth`, for example `(12/7/26, 18.2m)` and `(40)`.
 - Depth values are written in metres with `m`.
-- Notes are offset from the pile point, collision-checked, and connected with blue arrows pointing to the exact pile point.
+- Notes are offset close to the pile point and collision-checked so they avoid direct stacking without arrow lines across drawing text.
 - Piles added manually without drawing coordinates still appear in the summary pages.
 
 ## Local Data
@@ -63,7 +63,7 @@ Records are stored locally in the user's browser:
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.4`
+- Minor revision: `Ver1.0.5`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.
