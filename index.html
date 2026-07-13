@@ -7,8 +7,8 @@
     <title>AkZ Piling Status</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=1.0.5">
-    <script defer src="app.js?v=1.0.5"></script>
+    <link rel="stylesheet" href="styles.css?v=1.0.6">
+    <script defer src="app.js?v=1.0.6"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -104,7 +104,10 @@
             </div>
             <span class="preview-status" id="livePdfStatus">Upload a PDF to preview.</span>
           </div>
-          <iframe id="livePdfFrame" title="Live marked PDF preview"></iframe>
+          <div class="live-preview-viewport">
+            <canvas id="livePdfCanvas" aria-label="Live marked drawing preview" hidden></canvas>
+            <p id="livePdfEmpty">Upload a PDF to preview.</p>
+          </div>
         </section>
 
         <section class="entry-panel" aria-labelledby="entryTitle">
@@ -211,6 +214,6 @@
       </main>
     </div>
 
-    <div class="app-version">Ver1.0.5</div>
+    <div class="app-version">Ver1.0.6</div>
   </body>
 </html>

@@ -211,12 +211,30 @@ textarea:disabled {
   text-align: right;
 }
 
-#livePdfFrame {
+.live-preview-viewport {
   width: 100%;
   height: min(58vh, 520px);
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+#livePdfCanvas {
+  display: block;
+  margin: 0 auto;
+  background: #fff;
+}
+
+#livePdfEmpty {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 850;
+  margin: 0;
+  text-align: center;
 }
 
 .panel-head,
@@ -653,7 +671,7 @@ textarea:focus {
     padding: 13px;
   }
 
-  #livePdfFrame {
+  .live-preview-viewport {
     height: 430px;
   }
 

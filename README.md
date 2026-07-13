@@ -1,6 +1,6 @@
 # AkZ Piling Status
 
-Ver `1.0.5`
+Ver `1.0.6`
 
 AkZ Piling Status is a local-first web app/PWA for tracking piling progress from uploaded PDF setting-out drawings. It runs in a browser on Windows, Android, and iOS, and can be hosted as static files so anyone with the link can use the same app revision.
 
@@ -25,7 +25,7 @@ AkZ Piling Status is a local-first web app/PWA for tracking piling progress from
 
 Recorded piles are removed from the Daily input dropdowns so users do not accidentally enter the same pile twice. The pile register shows recorded piles only. Clearing a pile record from the pile register returns that pile to Daily input.
 
-The live PDF preview and exported PDF keep the original drawing, write saved pile/date/depth notes in blue near the recorded pile locations, and append AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
+The live PDF preview renders the marked drawing page directly in the app. The exported PDF keeps the original drawing, writes saved pile/date/depth notes in blue beside the recorded pile locations, and appends AkZ Piling Status summary pages with the latest pile records. A small status stamp is added to the original drawing page.
 
 ## Visual Extraction
 
@@ -47,7 +47,7 @@ When saving progress records or exporting PDF:
 - Each recorded pile with a detected drawing coordinate gets a compact blue pile/date/depth note beside the pile point.
 - The note uses pile number plus `D/M/YY, depth`, for example `(12/7/26, 18.2m)` and `(40)`.
 - Depth values are written in metres with `m`.
-- Notes are offset close to the pile point and collision-checked so they avoid direct stacking without arrow lines across drawing text.
+- Notes are offset only a short distance from the pile point and collision-checked so they avoid direct stacking without arrow lines across drawing text.
 - Piles added manually without drawing coordinates still appear in the summary pages.
 
 ## Local Data
@@ -63,7 +63,7 @@ Records are stored locally in the user's browser:
 
 The visible app version is fixed at the bottom right of the screen.
 
-- Minor revision: `Ver1.0.5`
+- Minor revision: `Ver1.0.6`
 - Major revision: `Ver1.1.0`
 
 Update `index.html`, `app.js`, `manifest.webmanifest`, `sw.js`, and this README when the version changes.

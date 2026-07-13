@@ -15,7 +15,7 @@ The first screen is the working app, not a landing page:
 - Daily input form for X-axis grid, Y-axis grid, pending pile number, piling date, penetration depth, and remarks
 - Live marked-PDF preview, latest registered-pile table, and selected-pile history
 - CSV export and original-PDF based status PDF output
-- Fixed bottom-right `Ver1.0.5`
+- Fixed bottom-right `Ver1.0.6`
 
 ## Local Architecture
 
@@ -50,6 +50,7 @@ Use semantic app display versions:
 - `Ver1.0.3` for split X/Y Daily input and pending-only pile choices
 - `Ver1.0.4` for OCR sequence outlier cleanup and arrowed PDF markups
 - `Ver1.0.5` for stored pile repair, registered-only table, live PDF preview, and direct PDF labels
+- `Ver1.0.6` for rendered marked-drawing preview and nearer direct PDF labels
 - `Ver1.1.0` for larger feature changes
 
 The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.

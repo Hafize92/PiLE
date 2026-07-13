@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.5";
+  const APP_VERSION = "1.0.6";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -48,7 +48,8 @@
     addRangeButton: document.querySelector("#addRangeButton"),
     statusBody: document.querySelector("#statusBody"),
     emptyState: document.querySelector("#emptyState"),
-    livePdfFrame: document.querySelector("#livePdfFrame"),
+    livePdfCanvas: document.querySelector("#livePdfCanvas"),
+    livePdfEmpty: document.querySelector("#livePdfEmpty"),
     livePdfStatus: document.querySelector("#livePdfStatus"),
     storageStatus: document.querySelector("#storageStatus")
   };
@@ -59,7 +60,6 @@
   let pdfLibPromise = null;
   let tesseractPromise = null;
   let dbPromise = null;
-  let livePdfPreviewUrl = "";
   let livePdfPreviewTimer = 0;
   let livePdfPreviewGeneration = 0;
 
@@ -1845,16 +1845,12 @@
 
     els.livePdfStatus.textContent = "Updating live PDF...";
     try {
-      const blob = await buildStatusPdfBlob(drawing);
+      const outputBytes = await buildStatusPdfBytes(drawing);
+      const preview = await renderMarkedDrawingPreview(outputBytes);
       if (generation !== livePdfPreviewGeneration) {
         return;
       }
-      const url = URL.createObjectURL(blob);
-      if (livePdfPreviewUrl) {
-        URL.revokeObjectURL(livePdfPreviewUrl);
-      }
-      livePdfPreviewUrl = url;
-      els.livePdfFrame.src = url;
+      showLivePreviewCanvas(preview);
       const recorded = drawing.piles.filter((pile) => getLatestRecord(drawing.id, pile.number)).length;
       els.livePdfStatus.textContent = `${recorded} registered pile${recorded === 1 ? "" : "s"} shown`;
     } catch (error) {
@@ -1865,12 +1861,47 @@
     }
   }
 
+  async function renderMarkedDrawingPreview(outputBytes) {
+    const pdfjsLib = await ensurePdfJs();
+    const source = outputBytes instanceof Uint8Array ? outputBytes.slice() : new Uint8Array(outputBytes);
+    const pdf = await pdfjsLib.getDocument({ data: source }).promise;
+    const page = await pdf.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const container = els.livePdfCanvas.parentElement;
+    const availableWidth = Math.max(320, container.clientWidth - 24);
+    const scale = clamp(availableWidth / baseViewport.width, 0.35, 2.4);
+    const viewport = page.getViewport({ scale });
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width * pixelRatio);
+    canvas.height = Math.ceil(viewport.height * pixelRatio);
+    canvas.style.width = `${Math.ceil(viewport.width)}px`;
+    canvas.style.height = `${Math.ceil(viewport.height)}px`;
+
+    const context = canvas.getContext("2d");
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    await page.render({ canvasContext: context, viewport }).promise;
+    await pdf.destroy?.();
+    return canvas;
+  }
+
+  function showLivePreviewCanvas(previewCanvas) {
+    const canvas = els.livePdfCanvas;
+    canvas.width = previewCanvas.width;
+    canvas.height = previewCanvas.height;
+    canvas.style.width = previewCanvas.style.width;
+    canvas.style.height = previewCanvas.style.height;
+    canvas.getContext("2d").drawImage(previewCanvas, 0, 0);
+    canvas.hidden = false;
+    els.livePdfEmpty.hidden = true;
+  }
+
   function clearLivePdfPreview(message) {
-    if (livePdfPreviewUrl) {
-      URL.revokeObjectURL(livePdfPreviewUrl);
-      livePdfPreviewUrl = "";
-    }
-    els.livePdfFrame.removeAttribute("src");
+    els.livePdfCanvas.hidden = true;
+    els.livePdfCanvas.width = 0;
+    els.livePdfCanvas.height = 0;
+    els.livePdfEmpty.hidden = false;
+    els.livePdfEmpty.textContent = message;
     els.livePdfStatus.textContent = message;
   }
 
@@ -1924,11 +1955,6 @@
     }
 
     const geometry = pdfPageGeometry(page);
-    const pileKeepouts = drawing.piles
-      .map((pile) => pileDisplayPoint(pile, geometry))
-      .filter(Boolean)
-      .map(pileAnnotationKeepout);
-
     const annotated = drawing.piles
       .map((pile) => {
         const latest = getLatestRecord(drawing.id, pile.number);
@@ -1951,7 +1977,7 @@
     }
 
     const fontSize = annotationFontSize(annotated.length);
-    const lineHeight = fontSize + 1.5;
+    const lineHeight = fontSize + 1.1;
     const occupied = [];
     const blue = PDFLib.rgb(0.03, 0.25, 0.9);
     const textRotation = PDFLib.degrees(displayTextRotation(geometry.rotation));
@@ -1959,7 +1985,7 @@
     annotated.forEach((item) => {
       const textWidth = Math.max(...item.lines.map((line) => font.widthOfTextAtSize(line, fontSize)), 18);
       const textHeight = lineHeight * item.lines.length;
-      const label = placeAnnotationLabel(item.point, textWidth, textHeight, geometry.display, occupied, pileKeepouts);
+      const label = placeAnnotationLabel(item.point, textWidth, textHeight, geometry.display, occupied);
       occupied.push(label.rect);
 
       [
@@ -2004,7 +2030,7 @@
     if (count > 25) {
       return 6.2;
     }
-    return 7;
+    return 6.2;
   }
 
   function pdfPageGeometry(page) {
@@ -2103,16 +2129,17 @@
 
   function pileAnnotationKeepout(point) {
     return {
-      x0: point.x - 18,
-      y0: point.y - 12,
-      x1: point.x + 18,
-      y1: point.y + 12
+      x0: point.x - 4,
+      y0: point.y - 4,
+      x1: point.x + 4,
+      y1: point.y + 4
     };
   }
 
-  function placeAnnotationLabel(point, width, height, pageSize, occupied, keepouts = []) {
-    const margin = 8;
+  function placeAnnotationLabel(point, width, height, pageSize, occupied) {
+    const margin = 6;
     const candidates = annotationCandidates(point, width, height);
+    const targetKeepout = pileAnnotationKeepout(point);
     let best = null;
 
     candidates.forEach((candidate) => {
@@ -2124,14 +2151,13 @@
       };
       rect.x1 = rect.x0 + width;
       rect.y1 = rect.y0 + height;
-      const anchorX = clamp(rect.x0 + (point.x < rect.x0 ? 0 : width), rect.x0, rect.x1);
-      const anchorY = clamp(rect.y0 + height * 0.45, rect.y0, rect.y1);
       const overlap = occupied.reduce((sum, item) => sum + rectOverlapArea(rect, item), 0);
-      const keepoutOverlap = keepouts.reduce((sum, item) => sum + rectOverlapArea(rect, item), 0);
-      const distance = Math.hypot(rect.x0 + width / 2 - point.x, rect.y0 + height / 2 - point.y);
-      const score = overlap * 1000 + keepoutOverlap * 500 + distance + edgePenalty(rect, pageSize);
+      const targetOverlap = rectOverlapArea(rect, targetKeepout);
+      const gapDistance = distanceFromPointToRect(point, rect);
+      const centerDistance = Math.hypot(rect.x0 + width / 2 - point.x, rect.y0 + height / 2 - point.y);
+      const score = gapDistance * 120 + centerDistance * 1.5 + overlap * 260 + targetOverlap * 900 + edgePenalty(rect, pageSize);
       if (!best || score < best.score) {
-        best = { rect, x: rect.x0, y: rect.y0, anchorX, anchorY, score };
+        best = { rect, x: rect.x0, y: rect.y0, score };
       }
     });
 
@@ -2140,15 +2166,23 @@
 
   function annotationCandidates(point, width, height) {
     const candidates = [];
-    [8, 16, 28, 42, 60, 82].forEach((gap) => {
-      candidates.push({ x: point.x + gap, y: point.y + gap * 0.25 });
-      candidates.push({ x: point.x - width - gap, y: point.y + gap * 0.25 });
-      candidates.push({ x: point.x + gap, y: point.y - height - gap * 0.25 });
-      candidates.push({ x: point.x - width - gap, y: point.y - height - gap * 0.25 });
+    [4, 8, 12, 18, 24, 32].forEach((gap) => {
+      candidates.push({ x: point.x + gap, y: point.y - height / 2 });
+      candidates.push({ x: point.x - width - gap, y: point.y - height / 2 });
       candidates.push({ x: point.x - width / 2, y: point.y + gap });
       candidates.push({ x: point.x - width / 2, y: point.y - height - gap });
+      candidates.push({ x: point.x + gap, y: point.y + gap });
+      candidates.push({ x: point.x - width - gap, y: point.y + gap });
+      candidates.push({ x: point.x + gap, y: point.y - height - gap });
+      candidates.push({ x: point.x - width - gap, y: point.y - height - gap });
     });
     return candidates;
+  }
+
+  function distanceFromPointToRect(point, rect) {
+    const dx = Math.max(rect.x0 - point.x, 0, point.x - rect.x1);
+    const dy = Math.max(rect.y0 - point.y, 0, point.y - rect.y1);
+    return Math.hypot(dx, dy);
   }
 
   function rectOverlapArea(a, b) {
@@ -2483,7 +2517,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.5").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.6").catch(() => {});
     }
   }
 
