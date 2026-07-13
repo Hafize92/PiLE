@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.6";
+  const APP_VERSION = "1.0.7";
+  const APP_NAME = "AKZ Piling Record";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
   const DB_VERSION = 1;
@@ -48,9 +49,12 @@
     addRangeButton: document.querySelector("#addRangeButton"),
     statusBody: document.querySelector("#statusBody"),
     emptyState: document.querySelector("#emptyState"),
+    livePdfViewport: document.querySelector("#livePdfViewport"),
     livePdfCanvas: document.querySelector("#livePdfCanvas"),
-    livePdfEmpty: document.querySelector("#livePdfEmpty"),
     livePdfStatus: document.querySelector("#livePdfStatus"),
+    zoomOutButton: document.querySelector("#zoomOutButton"),
+    zoomResetButton: document.querySelector("#zoomResetButton"),
+    zoomInButton: document.querySelector("#zoomInButton"),
     storageStatus: document.querySelector("#storageStatus")
   };
 
@@ -62,6 +66,9 @@
   let dbPromise = null;
   let livePdfPreviewTimer = 0;
   let livePdfPreviewGeneration = 0;
+  let livePdfZoom = 1;
+  let livePreviewInfo = null;
+  let remarkingPile = null;
 
   init();
 
@@ -86,8 +93,11 @@
     els.addPileButton.addEventListener("click", addSinglePile);
     els.addRangeButton.addEventListener("click", addPileRange);
     els.statusBody.addEventListener("click", handleStatusClick);
-    els.statusBody.addEventListener("change", handleStatusChange);
     els.pileHistory.addEventListener("click", handleStatusClick);
+    els.livePdfCanvas.addEventListener("click", handleLivePreviewClick);
+    els.zoomOutButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom / 1.2));
+    els.zoomResetButton.addEventListener("click", () => setLivePdfZoom(1));
+    els.zoomInButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom * 1.2));
 
     if (stateRepairedOnLoad) {
       persist();
@@ -1498,6 +1508,10 @@
       showMessage(`${pile.number} returned to Daily input.`);
     }
 
+    if (button.dataset.action === "remark") {
+      startPileRemarking(drawing, pile);
+    }
+
     if (button.dataset.action === "remove") {
       const hasRecords = state.records.some((record) => record.drawingId === drawing.id && record.pileNumber === pile.number);
       const ok = window.confirm(hasRecords ? `Remove ${pile.number} and its history?` : `Remove ${pile.number}?`);
@@ -1527,22 +1541,84 @@
     }
   }
 
-  function handleStatusChange(event) {
-    const select = event.target.closest("select[data-action='grid']");
-    if (!select) {
+  function startPileRemarking(drawing, pile) {
+    remarkingPile = { drawingId: drawing.id, pileNumber: pile.number };
+    updateRemarkingUi();
+    showMessage(`Click the correct pile ${pile.number} position on the PDF preview.`);
+    document.querySelector(".pdf-preview-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    renderStatusTable();
+  }
+
+  function cancelPileRemarking() {
+    remarkingPile = null;
+    updateRemarkingUi();
+    renderStatusTable();
+  }
+
+  function handleLivePreviewClick(event) {
+    if (!remarkingPile || !livePreviewInfo) {
       return;
     }
     const drawing = getActiveDrawing();
-    const pile = drawing?.piles.find((item) => item.number === select.dataset.pile);
+    const pile = drawing?.id === remarkingPile.drawingId ? drawing.piles.find((item) => item.number === remarkingPile.pileNumber) : null;
     if (!pile) {
+      cancelPileRemarking();
       return;
     }
-    pile.grid = select.value;
+
+    const rect = els.livePdfCanvas.getBoundingClientRect();
+    const cssX = clamp(event.clientX - rect.left, 0, rect.width);
+    const cssY = clamp(event.clientY - rect.top, 0, rect.height);
+    const displayPoint = {
+      x: cssX / livePreviewInfo.scale,
+      y: livePreviewInfo.displayHeight - cssY / livePreviewInfo.scale
+    };
+    const geometry = {
+      media: { width: livePreviewInfo.mediaWidth, height: livePreviewInfo.mediaHeight },
+      rotation: livePreviewInfo.rotation,
+      display: { width: livePreviewInfo.displayWidth, height: livePreviewInfo.displayHeight }
+    };
+    const pdfPoint = displayToPdfPoint(displayPoint, geometry);
+    const gridModel = gridModelFromDisplayedPilePoints(drawing, geometry);
+    const grid = nearestGrid({ x: displayPoint.x, top: displayPoint.y }, gridModel);
+
+    pile.x = pdfPoint.x;
+    pile.y = pdfPoint.y;
+    pile.coordinateScale = 1;
+    pile.source = "manual-mark";
+    if (grid) {
+      pile.grid = grid;
+      state.records.forEach((record) => {
+        if (record.drawingId === drawing.id && record.pileNumber === pile.number) {
+          record.grid = grid;
+          record.updatedAt = Date.now();
+        }
+      });
+    }
     drawing.updatedAt = Date.now();
+    remarkingPile = null;
     persist();
-    renderGridSelects();
-    renderPileSelect();
-    renderStats();
+    render();
+    showMessage(`${pile.number} position updated${grid ? ` near grid ${grid}` : ""}.`);
+  }
+
+  function gridModelFromDisplayedPilePoints(drawing, geometry) {
+    const pilePoints = drawing.piles
+      .map((pile) => ({ pile, point: pileDisplayPoint(pile, geometry) }))
+      .filter((item) => item.point);
+    const letters = drawing.gridLetters
+      .map((label) => {
+        const xs = pilePoints.filter((item) => splitGrid(item.pile.grid).x === label).map((item) => item.point.x);
+        return xs.length ? { label, x: median(xs), top: 0 } : null;
+      })
+      .filter(Boolean);
+    const numbers = drawing.gridNumbers
+      .map((label) => {
+        const ys = pilePoints.filter((item) => splitGrid(item.pile.grid).y === label).map((item) => item.point.y);
+        return ys.length ? { label, x: 0, top: median(ys) } : null;
+      })
+      .filter(Boolean);
+    return { letters, numbers };
   }
 
   function render() {
@@ -1555,6 +1631,7 @@
     renderStatusTable();
     renderHistory();
     updateControlStates();
+    updateRemarkingUi();
     scheduleLivePdfPreview();
   }
 
@@ -1647,7 +1724,6 @@
   function renderStatusTable() {
     const drawing = getActiveDrawing();
     const search = cleanText(els.pileSearch.value).toLowerCase();
-    const gridOptions = drawing ? getGridOptions(drawing) : [];
     const piles = drawing
       ? drawing.piles
           .filter((pile) => {
@@ -1663,37 +1739,35 @@
 
     els.emptyState.classList.toggle("show", !drawing || !piles.length);
     els.emptyState.querySelector("p").textContent = drawing ? "No registered piles match the current search." : "No drawing loaded.";
-    els.statusBody.innerHTML = piles.map((pile) => renderPileRow(drawing, pile, gridOptions)).join("");
+    els.statusBody.innerHTML = piles.map((pile) => renderPileRow(drawing, pile)).join("");
   }
 
-  function renderPileRow(drawing, pile, gridOptions) {
+  function renderPileRow(drawing, pile) {
     const latest = getLatestRecord(drawing.id, pile.number);
-    const gridHtml = [`<option value="">Unassigned</option>`]
-      .concat(gridOptions.map((grid) => `<option value="${escapeAttr(grid)}">${escapeHtml(grid)}</option>`))
-      .join("");
+    const grid = latest?.grid || pile.grid || "Unassigned";
     const statusClass = latest ? "status-done" : "status-open";
+    const isRemarking = remarkingPile?.drawingId === drawing.id && remarkingPile?.pileNumber === pile.number;
 
     return `
       <tr>
         <td><strong>${escapeHtml(pile.number)}</strong></td>
-        <td>
-          <select class="inline-select" data-action="grid" data-pile="${escapeAttr(pile.number)}">
-            ${gridHtml}
-          </select>
-        </td>
+        <td><span class="grid-text">${escapeHtml(grid)}</span></td>
         <td>${escapeHtml(latest?.date || "-")}</td>
         <td>${escapeHtml(latest?.penetrationDepth || "-")}</td>
         <td><span class="${statusClass}">${latest ? "Recorded" : "Pending"}</span></td>
-        <td class="row-actions">
+        <td>
+          <div class="row-actions">
+            <button class="secondary-button mini-button${isRemarking ? " is-active" : ""}" type="button" data-action="remark" data-pile="${escapeAttr(pile.number)}">${isRemarking ? "Marking" : "Re-mark"}</button>
           ${
             latest
               ? `<button class="secondary-button mini-button" type="button" data-action="clear-records" data-pile="${escapeAttr(pile.number)}">Clear record</button>`
               : `<button class="secondary-button mini-button" type="button" data-action="select" data-pile="${escapeAttr(pile.number)}">Select</button>`
           }
-          <button class="danger-button mini-button" type="button" data-action="remove" data-pile="${escapeAttr(pile.number)}">Remove</button>
+            <button class="danger-button mini-button" type="button" data-action="remove" data-pile="${escapeAttr(pile.number)}">Remove</button>
+          </div>
         </td>
       </tr>
-    `.replace('value="' + escapeAttr(pile.grid || "") + '"', 'value="' + escapeAttr(pile.grid || "") + '" selected');
+    `;
   }
 
   function renderHistory() {
@@ -1793,7 +1867,7 @@
     showMessage("Preparing PDF output...");
     try {
       const blob = await buildStatusPdfBlob(drawing);
-      downloadBlob(blob, `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-status.pdf`);
+      downloadBlob(blob, `${filenamePart(drawing.drawingTitle || drawing.fileName)}-akz-record.pdf`);
       showMessage("PDF output exported.");
     } catch (error) {
       showMessage(error.message === "missing-original-pdf" ? "Original PDF is not stored on this device. Re-upload it before exporting." : "PDF output failed. Check the PDF and try again.", true);
@@ -1806,6 +1880,14 @@
   }
 
   async function buildStatusPdfBytes(drawing) {
+    return buildMarkedPdfBytes(drawing, { includeSummary: true });
+  }
+
+  async function buildPreviewPdfBytes(drawing) {
+    return buildMarkedPdfBytes(drawing, { includeSummary: false });
+  }
+
+  async function buildMarkedPdfBytes(drawing, options = {}) {
     const originalBytes = await readPdfBytes(drawing.id);
     if (!originalBytes) {
       throw new Error("missing-original-pdf");
@@ -1819,12 +1901,14 @@
     const summaryRows = buildSummaryRows(drawing);
     const recorded = summaryRows.filter((row) => row.status === "Recorded").length;
 
-    pdfDoc.setTitle(`${drawing.drawingTitle || drawing.fileName} - AkZ Piling Status`);
-    pdfDoc.setSubject(`AkZ Piling Status Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
-    pdfDoc.setKeywords(["AkZ Piling Status", `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
+    pdfDoc.setTitle(`${drawing.drawingTitle || drawing.fileName} - ${APP_NAME}`);
+    pdfDoc.setSubject(`${APP_NAME} Ver${APP_VERSION}: ${recorded} of ${summaryRows.length} piles recorded`);
+    pdfDoc.setKeywords([APP_NAME, `Ver${APP_VERSION}`, "piling", "penetration", "local records"]);
     stampOriginalPdfPage(PDFLib, pages[0], font, drawing, recorded, summaryRows.length);
     annotatePileRecordsOnOriginalPage(PDFLib, pages[0], font, drawing);
-    appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
+    if (options.includeSummary !== false) {
+      appendSummaryPages(PDFLib, pdfDoc, font, bold, drawing, summaryRows);
+    }
 
     return pdfDoc.save({ useObjectStreams: false });
   }
@@ -1839,13 +1923,13 @@
     const generation = (livePdfPreviewGeneration += 1);
 
     if (!drawing) {
-      clearLivePdfPreview("Upload a PDF to preview.");
+      clearLivePdfPreview("No PDF loaded");
       return;
     }
 
     els.livePdfStatus.textContent = "Updating live PDF...";
     try {
-      const outputBytes = await buildStatusPdfBytes(drawing);
+      const outputBytes = await buildPreviewPdfBytes(drawing);
       const preview = await renderMarkedDrawingPreview(outputBytes);
       if (generation !== livePdfPreviewGeneration) {
         return;
@@ -1869,7 +1953,8 @@
     const baseViewport = page.getViewport({ scale: 1 });
     const container = els.livePdfCanvas.parentElement;
     const availableWidth = Math.max(320, container.clientWidth - 24);
-    const scale = clamp(availableWidth / baseViewport.width, 0.35, 2.4);
+    const fitScale = clamp(availableWidth / baseViewport.width, 0.35, 2.4);
+    const scale = clamp(fitScale * livePdfZoom, 0.25, 4);
     const viewport = page.getViewport({ scale });
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const canvas = document.createElement("canvas");
@@ -1881,6 +1966,16 @@
     const context = canvas.getContext("2d");
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     await page.render({ canvasContext: context, viewport }).promise;
+    const rotation = Number(page.rotate) || 0;
+    const unscaled = page.getViewport({ scale: 1, rotation });
+    livePreviewInfo = {
+      scale,
+      rotation: ((rotation % 360) + 360) % 360,
+      mediaWidth: unscaled.width,
+      mediaHeight: unscaled.height,
+      displayWidth: baseViewport.width,
+      displayHeight: baseViewport.height
+    };
     await pdf.destroy?.();
     return canvas;
   }
@@ -1893,16 +1988,41 @@
     canvas.style.height = previewCanvas.style.height;
     canvas.getContext("2d").drawImage(previewCanvas, 0, 0);
     canvas.hidden = false;
-    els.livePdfEmpty.hidden = true;
+    els.livePdfViewport.classList.remove("is-empty");
+    updateRemarkingUi();
   }
 
   function clearLivePdfPreview(message) {
     els.livePdfCanvas.hidden = true;
     els.livePdfCanvas.width = 0;
     els.livePdfCanvas.height = 0;
-    els.livePdfEmpty.hidden = false;
-    els.livePdfEmpty.textContent = message;
+    livePreviewInfo = null;
+    els.livePdfViewport.classList.add("is-empty");
     els.livePdfStatus.textContent = message;
+    updateRemarkingUi();
+  }
+
+  function setLivePdfZoom(value) {
+    livePdfZoom = clamp(value, 0.5, 4);
+    updateZoomControls();
+    scheduleLivePdfPreview();
+  }
+
+  function updateZoomControls() {
+    const hasDrawing = Boolean(getActiveDrawing());
+    els.zoomOutButton.disabled = !hasDrawing || livePdfZoom <= 0.51;
+    els.zoomResetButton.disabled = !hasDrawing;
+    els.zoomInButton.disabled = !hasDrawing || livePdfZoom >= 3.99;
+    els.zoomResetButton.textContent = `${Math.round(livePdfZoom * 100)}%`;
+  }
+
+  function updateRemarkingUi() {
+    const drawing = getActiveDrawing();
+    if (remarkingPile && (!drawing || drawing.id !== remarkingPile.drawingId || !drawing.piles.some((pile) => pile.number === remarkingPile.pileNumber))) {
+      remarkingPile = null;
+    }
+    els.livePdfViewport.classList.toggle("is-marking", Boolean(remarkingPile && livePreviewInfo));
+    updateZoomControls();
   }
 
   function buildSummaryRows(drawing) {
@@ -1924,7 +2044,7 @@
       return;
     }
     const { width } = page.getSize();
-    const text = `AkZ Piling Status Ver${APP_VERSION} | ${recorded}/${total} piles recorded | ${formatDateForDisplay(new Date())}`;
+    const text = `${APP_NAME} Ver${APP_VERSION} | ${recorded}/${total} piles recorded | ${formatDateForDisplay(new Date())}`;
     page.drawRectangle({
       x: 24,
       y: 20,
@@ -2215,7 +2335,7 @@
       const { width, height } = page.getSize();
       let y = height - margin;
 
-      page.drawText("AkZ Piling Status Summary", { x: margin, y, size: 16, font: bold, color: PDFLib.rgb(0.08, 0.3, 0.38) });
+      page.drawText(`${APP_NAME} Summary`, { x: margin, y, size: 16, font: bold, color: PDFLib.rgb(0.08, 0.3, 0.38) });
       page.drawText(`Ver${APP_VERSION}`, { x: width - margin - 48, y: y + 2, size: 9, font, color: PDFLib.rgb(0.28, 0.35, 0.38) });
       y -= 22;
       page.drawText(`Project: ${truncatePdfText(drawing.projectTitle || "-", 128)}`, { x: margin, y, size: 9, font, color: PDFLib.rgb(0.1, 0.12, 0.13) });
@@ -2517,7 +2637,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.6").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.7").catch(() => {});
     }
   }
 

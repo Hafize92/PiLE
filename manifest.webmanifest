@@ -1,8 +1,8 @@
 {
-  "name": "AkZ Piling Status",
-  "short_name": "AkZ Status",
-  "description": "Local-first PDF piling status tracker for grid, pile number, piling date, and penetration depth records.",
-  "start_url": "./index.html?v=1.0.6",
+  "name": "AKZ Piling Record",
+  "short_name": "AKZ Record",
+  "description": "Local-first PDF piling record tracker for grid, pile number, piling date, and penetration depth records.",
+  "start_url": "./index.html?v=1.0.7",
   "display": "standalone",
   "background_color": "#f4f7f8",
   "theme_color": "#164e63",

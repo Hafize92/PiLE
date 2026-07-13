@@ -4,11 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#164e63">
-    <title>AkZ Piling Status</title>
+    <title>AKZ Piling Record</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/hafize-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=1.0.6">
-    <script defer src="app.js?v=1.0.6"></script>
+    <link rel="stylesheet" href="styles.css?v=1.0.7">
+    <script defer src="app.js?v=1.0.7"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -16,7 +16,7 @@
         <div class="brand-block">
           <img class="brand-mark" src="assets/hafize-mark.svg" alt="">
           <div>
-            <h1>AkZ Piling Status</h1>
+            <h1>AKZ Piling Record</h1>
             <p>Local-first PDF piling tracker</p>
           </div>
         </div>
@@ -102,11 +102,17 @@
               <p class="eyebrow">Live PDF</p>
               <h2 id="pdfPreviewTitle">Marked drawing preview</h2>
             </div>
-            <span class="preview-status" id="livePdfStatus">Upload a PDF to preview.</span>
+            <div class="preview-tools">
+              <span class="preview-status" id="livePdfStatus">No PDF loaded</span>
+              <div class="zoom-controls" aria-label="PDF zoom controls">
+                <button class="icon-button" type="button" id="zoomOutButton" aria-label="Zoom out">-</button>
+                <button class="zoom-value" type="button" id="zoomResetButton" aria-label="Reset zoom">100%</button>
+                <button class="icon-button" type="button" id="zoomInButton" aria-label="Zoom in">+</button>
+              </div>
+            </div>
           </div>
-          <div class="live-preview-viewport">
+          <div class="live-preview-viewport is-empty" id="livePdfViewport">
             <canvas id="livePdfCanvas" aria-label="Live marked drawing preview" hidden></canvas>
-            <p id="livePdfEmpty">Upload a PDF to preview.</p>
           </div>
         </section>
 
@@ -214,6 +220,6 @@
       </main>
     </div>
 
-    <div class="app-version">Ver1.0.6</div>
+    <div class="app-version">Ver1.0.7</div>
   </body>
 </html>

@@ -1,8 +1,8 @@
-# AkZ Piling Status Design
+# AKZ Piling Record Design
 
 ## Goal
 
-AkZ Piling Status is a local-first PDF piling tracker. Site teams upload setting-out PDFs, review extracted drawing information, maintain a pile register by grid, and record piling date plus penetration depth until the drawing is complete.
+AKZ Piling Record is a local-first PDF piling tracker. Site teams upload setting-out PDFs, review extracted drawing information, maintain a pile register by grid, and record piling date plus penetration depth until the drawing is complete.
 
 ## Product Shape
 
@@ -11,17 +11,18 @@ The first screen is the working app, not a landing page:
 - PDF upload and active drawing selector
 - Editable project title and drawing title
 - Editable grid letters and grid numbers
-- Registered-pile table with per-pile grid dropdown
+- Registered-pile table with fixed recorded grid text
 - Daily input form for X-axis grid, Y-axis grid, pending pile number, piling date, penetration depth, and remarks
-- Live marked-PDF preview, latest registered-pile table, and selected-pile history
+- Live zoomable marked-PDF preview, latest registered-pile table, and selected-pile history
+- Re-mark action for manually correcting a pile point on the drawing preview
 - CSV export and original-PDF based status PDF output
-- Fixed bottom-right `Ver1.0.6`
+- Fixed bottom-right `Ver1.0.7`
 
 ## Local Architecture
 
 ```mermaid
 flowchart LR
-  User["Windows / Android / iOS browser"] --> App["AkZ Piling Status"]
+  User["Windows / Android / iOS browser"] --> App["AKZ Piling Record"]
   App <--> LS["localStorage records"]
   App <--> IDB["IndexedDB PDF files"]
   App --> CSV["CSV export"]
@@ -51,6 +52,7 @@ Use semantic app display versions:
 - `Ver1.0.4` for OCR sequence outlier cleanup and arrowed PDF markups
 - `Ver1.0.5` for stored pile repair, registered-only table, live PDF preview, and direct PDF labels
 - `Ver1.0.6` for rendered marked-drawing preview and nearer direct PDF labels
+- `Ver1.0.7` for AKZ Piling Record naming, zoomable preview, plain registered grids, cleaner status actions, and manual re-marking
 - `Ver1.1.0` for larger feature changes
 
 The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.
