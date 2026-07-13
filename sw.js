@@ -1,9 +1,9 @@
-const CACHE_NAME = "akz-piling-record-v1.0.7";
+const CACHE_NAME = "akz-piling-record-v1.0.8";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=1.0.7",
-  "./app.js?v=1.0.7",
+  "./styles.css?v=1.0.8",
+  "./app.js?v=1.0.8",
   "./manifest.webmanifest",
   "./assets/hafize-mark.svg"
 ];

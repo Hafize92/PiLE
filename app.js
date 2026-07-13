@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "1.0.7";
+  const APP_VERSION = "1.0.8";
   const APP_NAME = "AKZ Piling Record";
   const STORAGE_KEY = "akz:piling-status:v1";
   const DB_NAME = "akz-piling-status";
@@ -69,6 +69,8 @@
   let livePdfZoom = 1;
   let livePreviewInfo = null;
   let remarkingPile = null;
+  let pendingZoomAnchor = null;
+  let pinchZoomState = null;
 
   init();
 
@@ -95,9 +97,13 @@
     els.statusBody.addEventListener("click", handleStatusClick);
     els.pileHistory.addEventListener("click", handleStatusClick);
     els.livePdfCanvas.addEventListener("click", handleLivePreviewClick);
-    els.zoomOutButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom / 1.2));
-    els.zoomResetButton.addEventListener("click", () => setLivePdfZoom(1));
-    els.zoomInButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom * 1.2));
+    els.livePdfViewport.addEventListener("wheel", handleLivePreviewWheel, { passive: false });
+    els.livePdfViewport.addEventListener("touchstart", handleLivePreviewTouchStart, { passive: true });
+    els.livePdfViewport.addEventListener("touchmove", handleLivePreviewTouchMove, { passive: false });
+    els.livePdfViewport.addEventListener("touchend", handleLivePreviewTouchEnd, { passive: true });
+    els.zoomOutButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom / 1.2, viewerCenterAnchor()));
+    els.zoomResetButton.addEventListener("click", () => setLivePdfZoom(1, viewerCenterAnchor()));
+    els.zoomInButton.addEventListener("click", () => setLivePdfZoom(livePdfZoom * 1.2, viewerCenterAnchor()));
 
     if (stateRepairedOnLoad) {
       persist();
@@ -1509,7 +1515,12 @@
     }
 
     if (button.dataset.action === "remark") {
-      startPileRemarking(drawing, pile);
+      if (remarkingPile?.drawingId === drawing.id && remarkingPile?.pileNumber === pile.number) {
+        cancelPileRemarking();
+        showMessage(`Re-mark cancelled for ${pile.number}.`);
+      } else {
+        startPileRemarking(drawing, pile);
+      }
     }
 
     if (button.dataset.action === "remove") {
@@ -1745,7 +1756,6 @@
   function renderPileRow(drawing, pile) {
     const latest = getLatestRecord(drawing.id, pile.number);
     const grid = latest?.grid || pile.grid || "Unassigned";
-    const statusClass = latest ? "status-done" : "status-open";
     const isRemarking = remarkingPile?.drawingId === drawing.id && remarkingPile?.pileNumber === pile.number;
 
     return `
@@ -1754,13 +1764,12 @@
         <td><span class="grid-text">${escapeHtml(grid)}</span></td>
         <td>${escapeHtml(latest?.date || "-")}</td>
         <td>${escapeHtml(latest?.penetrationDepth || "-")}</td>
-        <td><span class="${statusClass}">${latest ? "Recorded" : "Pending"}</span></td>
         <td>
           <div class="row-actions">
-            <button class="secondary-button mini-button${isRemarking ? " is-active" : ""}" type="button" data-action="remark" data-pile="${escapeAttr(pile.number)}">${isRemarking ? "Marking" : "Re-mark"}</button>
+            <button class="secondary-button mini-button${isRemarking ? " is-active" : ""}" type="button" data-action="remark" data-pile="${escapeAttr(pile.number)}">${isRemarking ? "Cancel" : "Re-mark"}</button>
           ${
             latest
-              ? `<button class="secondary-button mini-button" type="button" data-action="clear-records" data-pile="${escapeAttr(pile.number)}">Clear record</button>`
+              ? `<button class="secondary-button mini-button" type="button" data-action="clear-records" data-pile="${escapeAttr(pile.number)}">Clear</button>`
               : `<button class="secondary-button mini-button" type="button" data-action="select" data-pile="${escapeAttr(pile.number)}">Select</button>`
           }
             <button class="danger-button mini-button" type="button" data-action="remove" data-pile="${escapeAttr(pile.number)}">Remove</button>
@@ -1913,9 +1922,9 @@
     return pdfDoc.save({ useObjectStreams: false });
   }
 
-  function scheduleLivePdfPreview() {
+  function scheduleLivePdfPreview(delay = 450) {
     window.clearTimeout(livePdfPreviewTimer);
-    livePdfPreviewTimer = window.setTimeout(refreshLivePdfPreview, 450);
+    livePdfPreviewTimer = window.setTimeout(refreshLivePdfPreview, delay);
   }
 
   async function refreshLivePdfPreview() {
@@ -1982,13 +1991,20 @@
 
   function showLivePreviewCanvas(previewCanvas) {
     const canvas = els.livePdfCanvas;
+    const viewport = els.livePdfViewport;
+    const zoomAnchor = pendingZoomAnchor;
     canvas.width = previewCanvas.width;
     canvas.height = previewCanvas.height;
     canvas.style.width = previewCanvas.style.width;
     canvas.style.height = previewCanvas.style.height;
     canvas.getContext("2d").drawImage(previewCanvas, 0, 0);
     canvas.hidden = false;
-    els.livePdfViewport.classList.remove("is-empty");
+    viewport.classList.remove("is-empty");
+    if (zoomAnchor && livePreviewInfo) {
+      viewport.scrollLeft = Math.max(0, zoomAnchor.baseX * livePreviewInfo.scale - zoomAnchor.viewportX);
+      viewport.scrollTop = Math.max(0, zoomAnchor.baseY * livePreviewInfo.scale - zoomAnchor.viewportY);
+      pendingZoomAnchor = null;
+    }
     updateRemarkingUi();
   }
 
@@ -2002,10 +2018,89 @@
     updateRemarkingUi();
   }
 
-  function setLivePdfZoom(value) {
-    livePdfZoom = clamp(value, 0.5, 4);
+  function setLivePdfZoom(value, anchor = null, delay = 120) {
+    const nextZoom = clamp(value, 0.5, 4);
+    if (Math.abs(nextZoom - livePdfZoom) < 0.01) {
+      return;
+    }
+    if (anchor && livePreviewInfo) {
+      pendingZoomAnchor = zoomAnchorFromClientPoint(anchor);
+    }
+    livePdfZoom = nextZoom;
     updateZoomControls();
-    scheduleLivePdfPreview();
+    scheduleLivePdfPreview(delay);
+  }
+
+  function handleLivePreviewWheel(event) {
+    if (!getActiveDrawing() || !livePreviewInfo || !(event.ctrlKey || event.metaKey)) {
+      return;
+    }
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setLivePdfZoom(livePdfZoom * factor, { clientX: event.clientX, clientY: event.clientY }, 90);
+  }
+
+  function handleLivePreviewTouchStart(event) {
+    if (event.touches.length !== 2 || !livePreviewInfo) {
+      pinchZoomState = null;
+      return;
+    }
+    pinchZoomState = {
+      distance: touchDistance(event.touches),
+      zoom: livePdfZoom
+    };
+  }
+
+  function handleLivePreviewTouchMove(event) {
+    if (!pinchZoomState || event.touches.length !== 2) {
+      return;
+    }
+    event.preventDefault();
+    const distance = touchDistance(event.touches);
+    if (pinchZoomState.distance <= 0 || distance <= 0) {
+      return;
+    }
+    const center = touchCenter(event.touches);
+    setLivePdfZoom(pinchZoomState.zoom * (distance / pinchZoomState.distance), center, 70);
+  }
+
+  function handleLivePreviewTouchEnd(event) {
+    if (event.touches.length < 2) {
+      pinchZoomState = null;
+    }
+  }
+
+  function touchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function touchCenter(touches) {
+    return {
+      clientX: (touches[0].clientX + touches[1].clientX) / 2,
+      clientY: (touches[0].clientY + touches[1].clientY) / 2
+    };
+  }
+
+  function viewerCenterAnchor() {
+    const rect = els.livePdfViewport.getBoundingClientRect();
+    return {
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2
+    };
+  }
+
+  function zoomAnchorFromClientPoint(anchor) {
+    const rect = els.livePdfViewport.getBoundingClientRect();
+    const viewportX = clamp(anchor.clientX - rect.left, 0, rect.width);
+    const viewportY = clamp(anchor.clientY - rect.top, 0, rect.height);
+    return {
+      baseX: (els.livePdfViewport.scrollLeft + viewportX) / livePreviewInfo.scale,
+      baseY: (els.livePdfViewport.scrollTop + viewportY) / livePreviewInfo.scale,
+      viewportX,
+      viewportY
+    };
   }
 
   function updateZoomControls() {
@@ -2637,7 +2732,7 @@
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator && /^https?:$/.test(window.location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=1.0.7").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=1.0.8").catch(() => {});
     }
   }
 
@@ -2863,7 +2958,7 @@
     els.appMessage.textContent = message;
     els.appMessage.classList.toggle("error", Boolean(isError));
     els.storageStatus.dataset.state = isError ? "error" : "local";
-    els.storageStatus.querySelector("span:last-child").textContent = isError ? "Needs review" : "Local data";
+    els.storageStatus.querySelector("span:last-child").textContent = isError ? "Needs review" : "Local to this browser";
   }
 
   function escapeHtml(value) {

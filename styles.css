@@ -208,6 +208,7 @@ textarea:disabled {
   width: 100%;
   height: min(58vh, 520px);
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -540,7 +541,8 @@ textarea:focus {
 
 .table-wrap {
   max-height: 66vh;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -548,7 +550,6 @@ textarea:focus {
 
 .status-table {
   width: 100%;
-  min-width: 960px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -587,27 +588,22 @@ textarea:focus {
 
 .status-table th:nth-child(2),
 .status-table td:nth-child(2) {
-  width: 12%;
+  width: 11%;
 }
 
 .status-table th:nth-child(3),
 .status-table td:nth-child(3) {
-  width: 14%;
+  width: 17%;
 }
 
 .status-table th:nth-child(4),
 .status-table td:nth-child(4) {
-  width: 10%;
+  width: 11%;
 }
 
 .status-table th:nth-child(5),
 .status-table td:nth-child(5) {
-  width: 13%;
-}
-
-.status-table th:nth-child(6),
-.status-table td:nth-child(6) {
-  width: 41%;
+  width: 51%;
 }
 
 .grid-text {
@@ -616,27 +612,6 @@ textarea:focus {
   color: var(--cyan-dark);
   font-weight: 850;
   overflow-wrap: anywhere;
-}
-
-.status-done,
-.status-open {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  border-radius: 7px;
-  padding: 3px 8px;
-  font-size: 0.76rem;
-  font-weight: 900;
-}
-
-.status-done {
-  color: var(--green);
-  background: #ecfdf3;
-}
-
-.status-open {
-  color: var(--amber);
-  background: #fff7ed;
 }
 
 .row-actions {

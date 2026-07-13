@@ -13,10 +13,10 @@ The first screen is the working app, not a landing page:
 - Editable grid letters and grid numbers
 - Registered-pile table with fixed recorded grid text
 - Daily input form for X-axis grid, Y-axis grid, pending pile number, piling date, penetration depth, and remarks
-- Live zoomable marked-PDF preview, latest registered-pile table, and selected-pile history
+- Live pinch/wheel zoomable marked-PDF preview, latest registered-pile table, and selected-pile history
 - Re-mark action for manually correcting a pile point on the drawing preview
 - CSV export and original-PDF based status PDF output
-- Fixed bottom-right `Ver1.0.7`
+- Fixed bottom-right `Ver1.0.8`
 
 ## Local Architecture
 
@@ -29,7 +29,7 @@ flowchart LR
   App --> PDF["Original PDF + status summary"]
 ```
 
-Data belongs to the browser/device. Updating the hosted app revision does not clear the user's local project records.
+Data belongs to each browser/device. Opening the same hosted link in another browser or by another user creates separate local project records. Updating the hosted app revision does not clear existing local records.
 
 ## PDF Extraction
 
@@ -53,6 +53,7 @@ Use semantic app display versions:
 - `Ver1.0.5` for stored pile repair, registered-only table, live PDF preview, and direct PDF labels
 - `Ver1.0.6` for rendered marked-drawing preview and nearer direct PDF labels
 - `Ver1.0.7` for AKZ Piling Record naming, zoomable preview, plain registered grids, cleaner status actions, and manual re-marking
+- `Ver1.0.8` for no-status registered table, no horizontal register scroll, Re-mark cancel, and pinch/wheel PDF zoom
 - `Ver1.1.0` for larger feature changes
 
 The version should be updated in the UI, service worker cache, manifest start URL, and documentation together.
